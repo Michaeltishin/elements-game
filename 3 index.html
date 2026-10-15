@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Пиксельная песочница: наслоение</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: Arial, sans-serif; }
+    #canvas { display: block; }
+    .ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      pointer-events: auto;
+      user-select: none;
+      z-index: 10;
+    }
+    button {
+      padding: 10px 16px;
+      margin-right: 8px;
+      cursor: pointer;
+      background: #333;
+      border: 2px solid #555;
+      color: white;
+      font-size: 14px;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    button:hover { background: #444; border-color: #777; }
+    button:active { background: #222; }
+    #tool {
+      margin-left: 12px;
+      font-weight: bold;
+      text-transform: capitalize;
+    }
+  </style>
+</head>
+<body>
+  <div class="ui">
+    <button onclick="setTool('sand')">Песок</button>
+    <button onclick="setTool('water')">Вода</button>
+    <button onclick="setTool('plant')">Растение</button>
+    <span id="tool">Песок</span>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const particles = [];
+    let tool = 'sand';
+
+    function setTool(t) {
+      tool = t;
+      document.getElementById('tool').textContent = t === 'sand' ? 'Песок' : t === 'water' ? 'Вода' : 'Растение';
+    }
+
+    class Particle {
+      constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        // Небольшая случайность, чтобы не падали идеально в столбик
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = 0;
+        this.type = type;
+        this.size = 8; // Чуть крупнее пиксель для наглядности
+        this.active = true;
+        this.stopped = false; // Частица остановилась и лежит на полу/других частицах
+      }
+
+      update() {
+        if (!this.active || this.stopped) return;
+
+        const floor = canvas.height - 10;
+
+        // Гравитация только для падающих элементов
+        if (this.type === 'sand' || this.type === 'water') {
+          this.vy += 0.8;
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // 1. Проверка пола
+        if (this.y >= floor) {
+          this.y = floor;
+          this.stopped = true; // Уперлись в пол
+          return;
+        }
+
+        // 2. Проверка столкновения с другими частицами (наслоение)
+        // Проверяем только активные частицы, которые уже лежат (stopped === true)
+        for (const other of particles) {
+          if (!other.stopped || other === this) continue;
+
+          // Простая проверка по квадратам (AABB)
+          const half = this.size / 2;
+          const otherHalf = other.size / 2;
+
+          const thisLeft = this.x - half;
+          const thisRight = this.x + half;
+          const thisTop = this.y - half;
+          const thisBottom = this.y + half;
+
+          const otherLeft = other.x - otherHalf;
+          const otherRight = other.x + otherHalf;
+          const otherTop = other.y - otherHalf;
+          const otherBottom = other.y + otherHalf;
+
+          // Если мы сверху и пересекаем другой объект по горизонтали
+          if (
+            thisBottom >= otherTop &&
+            thisTop <= otherBottom &&
+            thisLeft <= otherRight &&
+            thisRight >= otherLeft &&
+            this.y - half <= other.y + otherHalf // мы чуть выше него
+          ) {
+            // Упираемся в другую частицу
+            this.y = other.y - half - half; // Ставим ровно сверху
+            this.stopped = true;
+            return;
+          }
+        }
+      }
+
+      draw() {
+        ctx.fillStyle = this.type === 'sand' ? '#f4d03f' :
+                        this.type === 'water' ? '#3498db' :
+                        '#2ecc71';
+        
+        // Рисуем пиксель (квадрат)
+        ctx.fillRect(
+          Math.floor(this.x - this.size / 2),
+          Math.floor(this.y - this.size / 2),
+          this.size,
+          this.size
+        );
+      }
+    }
+
+    // Растение: ставим сразу на пол, оно не падает
+    function createPlant(x) {
+      const baseY = canvas.height - 10;
+      // Стебель
+      for (let i = 0; i < 5; i++) {
+        particles.push(new Particle(x, baseY - i * 12, 'plant'));
+      }
+      // Листики
+      particles.push(new Particle(x - 12, baseY - 48, 'plant'));
+      particles.push(new Particle(x + 12, baseY - 48, 'plant'));
+    }
+
+    let isDrawing = false;
+    window.addEventListener('mousedown', () => isDrawing = true);
+    window.addEventListener('mouseup', () => isDrawing = false);
+
+    window.addEventListener('mousemove', e => {
+      if (!isDrawing) return;
+      for (let i = 0; i < 3; i++) {
+        const dx = (Math.random() - 0.5) * 40;
+        const dy = (Math.random() - 0.5) * 40;
+        if (tool === 'plant') {
+          createPlant(e.clientX + dx);
+        } else {
+          particles.push(new Particle(e.clientX + dx, e.clientY + dy, tool));
+        }
+      }
+    });
+
+    function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => p.update());
+      particles.forEach(p => p.draw());
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

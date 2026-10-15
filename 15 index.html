@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Elements</title>
+<style>
+  body{margin:0;overflow:hidden;background:#1a1a1a;font-family:Arial,sans-serif}
+  #canvas{display:block;image-rendering:pixelated}
+  .title{position:absolute;top:10px;left:14px;z-index:10;font-size:22px;font-weight:bold;user-select:none;
+    background:linear-gradient(90deg,#ff3366,#ffaa00,#33ff66,#3399ff,#cc33ff);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px}
+  .topbar{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:10;display:flex;gap:6px;
+    pointer-events:auto;user-select:none}
+  .topbar button{padding:6px 12px;cursor:pointer;background:#2a2a2a;border:2px solid #444;color:#aaa;
+    font-size:12px;border-radius:6px;transition:all .15s}
+  .topbar button:hover{background:#383838;border-color:#666;color:#fff}
+  .topbar button.active{background:#444;border-color:#888;color:#fff}
+  .mp{position:absolute;top:48px;left:50%;transform:translateX(-50%);z-index:10;background:rgba(0,0,0,.8);
+    border-radius:8px;padding:10px 18px;color:#fff;font-size:13px;text-align:center;min-width:300px;display:none}
+  .mp .n{font-weight:bold;margin-bottom:4px}
+  .mp .d{font-size:11px;color:#aaa;margin-bottom:8px}
+  .mp .b{height:6px;background:#333;border-radius:3px;overflow:hidden}
+  .mp .f{height:100%;background:linear-gradient(90deg,#33ff66,#3399ff);transition:width .3s;width:0}
+  .mp .s{font-size:11px;margin-top:5px}
+  .toolbar{position:absolute;bottom:0;left:0;right:0;z-index:10;pointer-events:auto;user-select:none;
+    display:flex;align-items:flex-end;justify-content:center;gap:5px;padding:8px 10px 10px;
+    background:linear-gradient(180deg,transparent,rgba(0,0,0,.65));flex-wrap:wrap}
+  .el-btn{width:52px;height:60px;border-radius:8px;cursor:pointer;border:2px solid #333;background:#1e1e1e;
+    overflow:hidden;display:flex;flex-direction:column;transition:all .15s;position:relative}
+  .el-btn:hover{border-color:#666;transform:translateY(-2px)}
+  .el-btn.active{border-color:#fff;box-shadow:0 0 8px rgba(255,255,255,.3)}
+  .el-btn.inactive{opacity:.4}
+  .el-pv{width:100%;height:34px;display:flex;align-items:center;justify-content:center}
+  .el-pv canvas{display:block}
+  .el-lb{font-size:9px;color:#ccc;text-align:center;padding:2px 0 3px;background:rgba(0,0,0,.4)}
+  .br{display:flex;align-items:center;gap:6px;color:#aaa;font-size:12px;margin-left:10px;padding-bottom:6px}
+  .br input[type=range]{cursor:pointer;accent-color:#66aaff;width:70px}
+</style>
+</head>
+<body>
+<div class="title">Elements</div>
+<div class="topbar">
+  <button id="btn-sensor" onclick="toggleSensor()">Датчик: ВЫКЛ</button>
+  <button id="btn-pause" onclick="togglePause()">Пауза: ВЫКЛ</button>
+  <button id="btn-ai" onclick="toggleAI()">ИИ: ВЫКЛ</button>
+  <button id="btn-save" onclick="saveState()">Сохранить</button>
+  <button id="btn-load" onclick="loadState()">Загрузить</button>
+  <button id="btn-mission" onclick="cycleMission()">Миссия: нет</button>
+</div>
+<div class="mp" id="missionPanel">
+  <div class="n" id="mpName"></div>
+  <div class="d" id="mpDesc"></div>
+  <div class="b"><div class="f" id="mpFill"></div></div>
+  <div class="s" id="mpStatus"></div>
+</div>
+<div class="toolbar" id="toolbar"></div>
+<canvas id="canvas"></canvas>
+<script>
+'use strict';
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const CELL = 6;
+let cols, rows, grid, next, life, temp, spawnerType;
+
+// Константы элементов
+const EMPTY=0, SAND=1, WATER=2, PLANT=3, FIRE=4, STONE=5, ICE=6, LAVA=7;
+const SPAWNER=8, STEAM=9, OIL=10, ACID=11, GUNPOWDER=12, SMOKE=13;
+
+const ELEMENTS = [
+  {id:'sand',name:'Песок',cell:SAND},
+  {id:'water',name:'Вода',cell:WATER},
+  {id:'plant',name:'Растение',cell:PLANT},
+  {id:'stone',name:'Камень',cell:STONE},
+  {id:'ice',name:'Лёд',cell:ICE},
+  {id:'fire',name:'Огонь',cell:FIRE},
+  {id:'lava',name:'Лава',cell:LAVA},
+  {id:'oil',name:'Масло',cell:OIL},
+  {id:'acid',name:'Кислота',cell:ACID},
+  {id:'gunpowder',name:'Порох',cell:GUNPOWDER},
+  {id:'steam',name:'Пар',cell:STEAM},
+  {id:'smoke',name:'Дым',cell:SMOKE},
+  {id:'spawner',name:'Спавнер',cell:SPAWNER},
+  {id:'erase',name:'Ластик',cell:EMPTY},
+];
+
+const CELL_MAP = {
+  sand:SAND, water:WATER, plant:PLANT, stone:STONE, ice:ICE,
+  fire:FIRE, lava:LAVA, oil:OIL, acid:ACID, gunpowder:GUNPOWDER,
+  steam:STEAM, smoke:SMOKE,
+};
+
+function initGrid() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  cols = Math.floor(canvas.width / CELL);
+  rows = Math.floor(canvas.height / CELL);
+  grid = new Uint8Array(cols * rows);
+  next = new Uint8Array(cols * rows);
+  life = new Int16Array(cols * rows);
+  temp = new Float32Array(cols * rows);
+  spawnerType = new Uint8Array(cols * rows);
+  temp.fill(20);
+}
+initGrid();
+window.addEventListener('resize', initGrid);
+
+let tool = 'sand';
+let brushSize = 2;
+let mouseX = -100, mouseY = -100;
+let sensorOn = false;
+let paused = false;
+let windX = 0;
+let frameCount = 0;
+
+function idx(x, y) { return y * cols + x; }
+
+// === Превью кнопок ===
+function drawPreview(cell) {
+  const pc = document.createElement('canvas');
+  pc.width = 48; pc.height = 34;
+  const p = pc.getContext('2d');
+  p.fillStyle = '#1e1e1e';
+  p.fillRect(0, 0, 48, 34);
+  if (cell === EMPTY) {
+    p.strokeStyle = '#ff4444'; p.lineWidth = 3;
+    p.beginPath(); p.moveTo(12, 8); p.lineTo(36, 26);
+    p.moveTo(36, 8); p.lineTo(12, 26); p.stroke();
+    return pc;
+  }
+  if (cell === SPAWNER) {
+    p.fillStyle = '#444'; p.fillRect(0, 0, 48, 34);
+    p.fillStyle = '#666';
+    for (let y = 2; y < 32; y += 5)
+      for (let x = 2; x < 46; x += 5)
+        if (Math.random() < 0.3) p.fillRect(x, y, 4, 4);
+    p.fillStyle = '#88ccff';
+    p.shadowColor = '#3399ff'; p.shadowBlur = 6;
+    p.fillRect(21, 14, 6, 6);
+    return pc;
+  }
+  const ps = 4;
+  for (let py = 0; py < 34; py += ps)
+    for (let px = 0; px < 48; px += ps) {
+      const r = Math.random();
+      let c;
+      if (cell === FIRE)       c = r < 0.3 ? '#ff3300' : r < 0.6 ? '#ff9900' : '#ffcc00';
+      else if (cell === LAVA)  c = r < 0.3 ? '#ffee44' : r < 0.6 ? '#ff7700' : '#cc3300';
+      else if (cell === STONE) c = r < 0.2 ? '#777' : r < 0.5 ? '#888' : '#999';
+      else if (cell === SAND)  c = r < 0.2 ? '#d8b43c' : r < 0.6 ? '#e8c44c' : '#f0d45c';
+      else if (cell === WATER) c = r < 0.2 ? '#2770c4' : r < 0.6 ? '#2f7fd4' : '#378fe0';
+      else if (cell === ICE)   c = r < 0.2 ? '#98d0e8' : r < 0.6 ? '#a8e0f0' : '#b8eaf8';
+      else if (cell === PLANT) c = r < 0.2 ? '#2aa53a' : r < 0.6 ? '#3ab54a' : '#4ac55a';
+      else if (cell === STEAM) c = r < 0.3 ? '#b0c8e0' : r < 0.6 ? '#c8dcf0' : '#d8e8f8';
+      else if (cell === OIL)   c = r < 0.2 ? '#445522' : r < 0.6 ? '#556633' : '#667744';
+      else if (cell === ACID)  c = r < 0.2 ? '#66dd22' : r < 0.6 ? '#88ff44' : '#aaff66';
+      else if (cell === GUNPOWDER) c = r < 0.2 ? '#222' : r < 0.5 ? '#333' : '#444';
+      else if (cell === SMOKE) c = r < 0.3 ? '#555' : r < 0.6 ? '#666' : '#777';
+      else c = '#555';
+      p.fillStyle = c;
+      p.fillRect(px, py, ps, ps);
+    }
+  return pc;
+}
+
+function buildToolbar() {
+  const tb = document.getElementById('toolbar');
+  tb.innerHTML = '';
+  for (const el of ELEMENTS) {
+    const btn = document.createElement('div');
+    btn.className = 'el-btn' + (el.id === tool ? ' active' : '');
+    btn.id = 'btn-' + el.id;
+    btn.onclick = () => setTool(el.id);
+    const pv = document.createElement('div');
+    pv.className = 'el-pv';
+    pv.appendChild(drawPreview(el.cell));
+    const lb = document.createElement('div');
+    lb.className = 'el-lb';
+    lb.textContent = el.name;
+    btn.appendChild(pv); btn.appendChild(lb);
+    tb.appendChild(btn);
+  }
+  const brush = document.createElement('div');
+  brush.className = 'br';
+  brush.innerHTML = 'Кисть:<input type="range" id="brushSize" min="1" max="12" value="2"><span id="bv">2</span>';
+  const wind = document.createElement('div');
+  wind.className = 'br';
+  wind.innerHTML = 'Ветер:<input type="range" id="windSlider" min="-5" max="5" value="0"><span id="wv">0</span>';
+  tb.appendChild(brush); tb.appendChild(wind);
+  document.getElementById('brushSize').oninput = e => {
+    brushSize = +e.target.value;
+    document.getElementById('bv').textContent = brushSize;
+  };
+  document.getElementById('windSlider').oninput = e => {
+    windX = +e.target.value;
+    document.getElementById('wv').textContent = windX;
+  };
+}
+buildToolbar();
+
+function setTool(t) {
+  tool = (tool === t) ? null : t;
+  document.querySelectorAll('.el-btn').forEach(b => {
+    b.classList.remove('active');
+    b.classList.add('inactive');
+  });
+  if (tool) {
+    const b = document.getElementById('btn-' + tool);
+    if (b) { b.classList.add('active'); b.classList.remove('inactive'); }
+  } else {
+    document.querySelectorAll('.el-btn').forEach(b => b.classList.remove('inactive'));
+  }
+}
+
+function toggleSensor() {
+  sensorOn = !sensorOn;
+  const b = document.getElementById('btn-sensor');
+  b.textContent = 'Датчик: ' + (sensorOn ? 'ВКЛ' : 'ВЫКЛ');
+  b.classList.toggle('active', sensorOn);
+}
+
+function togglePause() {
+  paused = !paused;
+  const b = document.getElementById('btn-pause');
+  b.textContent = 'Пауза: ' + (paused ? 'ВКЛ' : 'ВЫКЛ');
+  b.classList.toggle('active', paused);
+}
+
+// === Размещение элемента ===
+function placeElement(i, t) {
+  const c = CELL_MAP[t];
+  if (!c) return;
+  grid[i] = c;
+  if (c === FIRE) { life[i] = 15 + Math.floor(Math.random() * 10); temp[i] = 800; }
+  else if (c === LAVA) temp[i] = 5000;
+  else if (c === ICE) temp[i] = -50;
+  else if (c === STEAM) { life[i] = 100 + Math.floor(Math.random() * 50); temp[i] = 150; }
+  else if (c === SMOKE) { life[i] = 60 + Math.floor(Math.random() * 40); temp[i] = 100; }
+  else temp[i] = 20;
+}
+
+// === Рисование мышью ===
+let isDrawing = false, lastPaintX = -1, lastPaintY = -1;
+
+function paintAt(px, py) {
+  if (!tool) return;
+  const cx = Math.floor(px / CELL), cy = Math.floor(py / CELL);
+  if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) return;
+  // Стирание ИИ-курсора
+  if (tool === 'erase' && aiCursor) {
+    const dx = px - aiCursor.x, dy = py - aiCursor.y;
+    if (dx * dx + dy * dy < (brushSize * CELL + 12) ** 2) {
+      aiCursor = null;
+      const b = document.getElementById('btn-ai');
+      b.textContent = 'ИИ: ВЫКЛ'; b.classList.remove('active');
+    }
+  }
+  const r = brushSize;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r + 1) continue;
+      const x = cx + dx, y = cy + dy;
+      if (x < 0 || x >= cols || y < 0 || y >= rows) continue;
+      const i = idx(x, y);
+      if (tool === 'erase') {
+        grid[i] = EMPTY; life[i] = 0; temp[i] = 20; spawnerType[i] = 0;
+      } else if (tool === 'spawner') {
+        if (grid[i] === EMPTY) { grid[i] = SPAWNER; spawnerType[i] = 0; temp[i] = 20; }
+      } else if (tool === 'fire') {
+        if (grid[i] === EMPTY || grid[i] === PLANT) {
+          grid[i] = FIRE; life[i] = 15 + Math.floor(Math.random() * 10); temp[i] = 800;
+        } else if (grid[i] === ICE) { grid[i] = WATER; temp[i] = 20; }
+        else if (grid[i] === OIL) { grid[i] = FIRE; life[i] = 35 + Math.floor(Math.random() * 20); temp[i] = 800; }
+        else if (grid[i] === SPAWNER) spawnerType[i] = FIRE;
+        else if (grid[i] === GUNPOWDER) {
+          explosionQueue.push({x: x, y: y, r: 5});
+          grid[i] = EMPTY;
+        }
+      } else {
+        if (grid[i] === EMPTY) placeElement(i, tool);
+        else if (grid[i] === SPAWNER && CELL_MAP[tool]) spawnerType[i] = CELL_MAP[tool];
+      }
+    }
+  }
+}
+
+function paintLine(x1, y1, x2, y2) {
+  const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+  const steps = Math.max(dx, dy);
+  if (steps === 0) { paintAt(x1, y1); return; }
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    paintAt(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+  }
+}
+
+canvas.addEventListener('mousedown', e => {
+  isDrawing = true; lastPaintX = e.clientX; lastPaintY = e.clientY;
+  paintAt(e.clientX, e.clientY);
+});
+window.addEventListener('mouseup', () => { isDrawing = false; lastPaintX = lastPaintY = -1; });
+canvas.addEventListener('mousemove', e => {
+  mouseX = e.clientX; mouseY = e.clientY;
+  if (!isDrawing) return;
+  const dist = Math.sqrt((e.clientX - lastPaintX) ** 2 + (e.clientY - lastPaintY) ** 2);
+  if (dist < CELL) return;
+  paintLine(lastPaintX, lastPaintY, e.clientX, e.clientY);
+  lastPaintX = e.clientX; lastPaintY = e.clientY;
+});
+
+// === Цвета ===
+function fireColor(l) {
+  if (l > 18) return '#ff3300';
+  if (l > 12) return '#ff6600';
+  if (l > 7) return '#ff9900';
+  if (l > 3) return '#ffcc00';
+  return '#ffff00';
+}
+function stoneColor(t) {
+  if (t > 800) return '#ff5533';
+  if (t > 500) return '#aa6644';
+  if (t > 200) return '#997755';
+  return '#888888';
+}
+function iceColor(t) { return t > -10 ? '#c8eef8' : '#a8e0f0'; }
+function lavaColor(t) {
+  if (t > 4000) return '#ffee44';
+  if (t > 3000) return '#ffaa00';
+  if (t > 2000) return '#ff7700';
+  if (t > 1000) return '#ff4400';
+  return '#cc3300';
+}
+function spawnerColor(st) {
+  const m = {1:'#e8c44c',2:'#2f7fd4',3:'#3ab54a',4:'#888888',5:'#a8e0f0',6:'#ff6600',7:'#ff4400',
+    9:'#c8dcf0',10:'#556633',11:'#88ff44',12:'#333333',13:'#888888'};
+  return m[st] || '#555555';
+}
+function tempColor(t) {
+  if (t < -100) return '#3399ff';
+  if (t < 0) return '#66ccff';
+  if (t < 100) return '#ffffff';
+  if (t < 500) return '#ffff66';
+  if (t < 1000) return '#ff9933';
+  if (t < 3000) return '#ff6600';
+  return '#ff3300';
+}
+
+// === Ветер ===
+function windDir(factor) {
+  if (factor === undefined) factor = 1;
+  if (windX === 0) return Math.random() < 0.5 ? -1 : 1;
+  const bias = Math.max(0.05, Math.min(0.95, 0.5 + windX * 0.08 * factor));
+  return Math.random() < bias ? 1 : -1;
+}
+
+// === Взрыв ===
+let explosionQueue = [];
+function explode(ex, ey, radius) {
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > radius) continue;
+      const nx = ex + dx, ny = ey + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny);
+      if (dist < radius * 0.3) {
+        grid[ni] = EMPTY; temp[ni] = 800;
+      } else if (dist < radius * 0.7) {
+        if (Math.random() < 0.4) { grid[ni] = FIRE; life[ni] = 15 + Math.floor(Math.random() * 10); temp[ni] = 800; }
+        else { grid[ni] = EMPTY; temp[ni] = 500; }
+      } else {
+        if (grid[ni] === EMPTY || grid[ni] === PLANT || grid[ni] === OIL) {
+          grid[ni] = FIRE; life[ni] = 10 + Math.floor(Math.random() * 10); temp[ni] = 800;
+        }
+      }
+    }
+  }
+}
+
+// === Физика ===
+function step() {
+  next.set(grid);
+  for (let y = rows - 1; y >= 0; y--) {
+    if (frameCount % 2 === 0) {
+      for (let x = 0; x < cols; x++) updateCell(x, y);
+    } else {
+      for (let x = cols - 1; x >= 0; x--) updateCell(x, y);
+    }
+  }
+  grid.set(next);
+}
+
+function updateCell(x, y) {
+  const i = idx(x, y);
+  const cell = grid[i];
+  if (cell === EMPTY || cell === PLANT || cell === STONE || cell === ICE || cell === SPAWNER) return;
+  if (cell === SAND) updateSand(x, y, i);
+  else if (cell === WATER) updateFluid(x, y, i, WATER, 1, 0.4, 1);
+  else if (cell === FIRE) updateFire(x, y, i);
+  else if (cell === LAVA) updateLava(x, y, i);
+  else if (cell === STEAM) updateRising(x, y, i, STEAM, 0.8, true);
+  else if (cell === OIL) updateFluid(x, y, i, OIL, 0.6, 0.2, 0.8);
+  else if (cell === ACID) updateFluid(x, y, i, ACID, 0.8, 0.3, 1);
+  else if (cell === GUNPOWDER) updateGunpowder(x, y, i);
+  else if (cell === SMOKE) updateRising(x, y, i, SMOKE, 0.5, true);
+}
+
+function updateSand(x, y, i) {
+  if (y + 1 >= rows) return;
+  const below = idx(x, y + 1);
+  if (grid[below] === EMPTY) { next[i] = EMPTY; next[below] = SAND; return; }
+  const dir = windDir(0.5);
+  for (const d of [dir, -dir]) {
+    const nx = x + d;
+    if (nx < 0 || nx >= cols) continue;
+    const diag = idx(nx, y + 1);
+    if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) {
+      next[i] = EMPTY; next[diag] = SAND; return;
+    }
+  }
+}
+
+function updateFluid(x, y, i, type, flowSpeed, spreadChance, windFactor) {
+  if (Math.random() > flowSpeed) return;
+  if (y + 1 >= rows) return;
+  const below = idx(x, y + 1);
+  if (grid[below] === EMPTY) { next[i] = EMPTY; next[below] = type; return; }
+  const dir = windDir(windFactor);
+  for (const d of [dir, -dir]) {
+    const nx = x + d;
+    if (nx < 0 || nx >= cols) continue;
+    const diag = idx(nx, y + 1);
+    if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) {
+      next[i] = EMPTY; next[diag] = type; return;
+    }
+  }
+  if (Math.random() < spreadChance) {
+    for (const d of [dir, -dir]) {
+      const nx = x + d;
+      if (nx < 0 || nx >= cols) continue;
+      const side = idx(nx, y);
+      if (grid[side] === EMPTY && next[side] === EMPTY) {
+        next[i] = EMPTY; next[side] = type; return;
+      }
+    }
+  }
+  // Масло всплывает над водой
+  if (type === OIL && y > 0) {
+    const above = idx(x, y - 1);
+    if (grid[above] === WATER && next[above] === WATER) {
+      next[above] = OIL; next[i] = WATER; return;
+    }
+  }
+  // Кислота растворяет
+  if (type === ACID) {
+    const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    for (const [dx, dy] of dirs) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny), nc = grid[ni];
+      if (nc === STONE || nc === ICE || nc === PLANT) {
+        if (Math.random() < 0.08) {
+          next[ni] = EMPTY;
+          if (Math.random() < 0.4) { next[i] = EMPTY; return; }
+        }
+      }
+    }
+  }
+}
+
+function updateRising(x, y, i, type, riseSpeed, lifeBased) {
+  if (type === STEAM && temp[i] < 80) { next[i] = WATER; temp[i] = 20; return; }
+  if (lifeBased) {
+    life[i]--;
+    if (life[i] <= 0) { next[i] = (type === STEAM) ? WATER : EMPTY; temp[i] = 20; return; }
+  }
+  if (Math.random() > riseSpeed) return;
+  if (y > 0) {
+    const above = idx(x, y - 1);
+    if (grid[above] === EMPTY && next[above] === EMPTY) {
+      next[above] = type; next[i] = EMPTY;
+      if (lifeBased) { life[above] = life[i]; life[i] = 0; }
+      temp[above] = temp[i]; temp[i] = 20; return;
+    }
+  }
+  const dir = windDir(2);
+  for (const d of [dir, -dir]) {
+    const nx = x + d;
+    if (nx < 0 || nx >= cols || y === 0) continue;
+    const diag = idx(nx, y - 1);
+    if (grid[diag] === EMPTY && next[diag] === EMPTY) {
+      next[diag] = type; next[i] = EMPTY;
+      if (lifeBased) { life[diag] = life[i]; life[i] = 0; }
+      temp[diag] = temp[i]; temp[i] = 20; return;
+    }
+  }
+  if (Math.random() < 0.3) {
+    const wd = windDir(2), nx = x + wd;
+    if (nx >= 0 && nx < cols) {
+      const side = idx(nx, y);
+      if (grid[side] === EMPTY && next[side] === EMPTY) {
+        next[side] = type; next[i] = EMPTY;
+        if (lifeBased) { life[side] = life[i]; life[i] = 0; }
+        return;
+      }
+    }
+  }
+}
+
+function updateFire(x, y, i) {
+  life[i]--;
+  if (life[i] <= 0) {
+    if (Math.random() < 0.15) {
+      next[i] = SMOKE; life[i] = 60 + Math.floor(Math.random() * 40); temp[i] = 100;
+    } else {
+      next[i] = EMPTY; life[i] = 0; temp[i] = 20;
+    }
+    return;
+  }
+  const nb = [[x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y],
+              [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1], [x + 1, y + 1]];
+  for (const [nx, ny] of nb) {
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+    const ni = idx(nx, ny);
+    if (grid[ni] === PLANT && next[ni] === PLANT && Math.random() < 0.35) {
+      next[ni] = FIRE; life[ni] = 15 + Math.floor(Math.random() * 10); temp[ni] = 800;
+    }
+    if (grid[ni] === OIL && next[ni] === OIL && Math.random() < 0.5) {
+      next[ni] = FIRE; life[ni] = 35 + Math.floor(Math.random() * 20); temp[ni] = 800;
+    }
+    if (grid[ni] === ICE && Math.random() < 0.25) { next[ni] = WATER; temp[ni] = 20; }
+    if (grid[ni] === WATER) {
+      life[i] -= 3;
+      if (Math.random() < 0.3) { next[ni] = EMPTY; temp[ni] = 20; }
+    }
+    if (grid[ni] === GUNPOWDER) {
+      explosionQueue.push({x: nx, y: ny, r: 5});
+      next[ni] = EMPTY;
+    }
+  }
+  if (y - 1 >= 0) {
+    const above = idx(x, y - 1);
+    if (grid[above] === EMPTY && next[above] === EMPTY) {
+      next[above] = FIRE; life[above] = life[i]; temp[above] = 800;
+      next[i] = EMPTY; life[i] = 0; temp[i] = 20; return;
+    }
+  }
+  const dir = windDir(1.5);
+  for (const d of [dir, -dir]) {
+    const nx = x + d;
+    if (nx < 0 || nx >= cols || y - 1 < 0) continue;
+    const diag = idx(nx, y - 1);
+    if (grid[diag] === EMPTY && next[diag] === EMPTY) {
+      next[diag] = FIRE; life[diag] = life[i]; temp[diag] = 800;
+      next[i] = EMPTY; life[i] = 0; temp[i] = 20; return;
+    }
+  }
+}
+
+function updateLava(x, y, i) {
+  if (Math.random() > 0.7) return;
+  if (y + 1 >= rows) return;
+  const below = idx(x, y + 1);
+  if (grid[below] === EMPTY) {
+    next[i] = EMPTY; next[below] = LAVA;
+    temp[below] = temp[i]; temp[i] = 20; return;
+  }
+  const dir = windDir(0.3);
+  for (const d of [dir, -dir]) {
+    const nx = x + d;
+    if (nx < 0 || nx >= cols) continue;
+    const diag = idx(nx, y + 1);
+    if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) {
+      next[i] = EMPTY; next[diag] = LAVA;
+      temp[diag] = temp[i]; temp[i] = 20; return;
+    }
+  }
+  if (Math.random() < 0.2) {
+    for (const d of [dir, -dir]) {
+      const nx = x + d;
+      if (nx < 0 || nx >= cols) continue;
+      const side = idx(nx, y);
+      if (grid[side] === EMPTY && next[side] === EMPTY) {
+        next[i] = EMPTY; next[side] = LAVA;
+        temp[side] = temp[i]; temp[i] = 20; return;
+      }
+    }
+  }
+}
+
+function updateGunpowder(x, y, i) {
+  const nb = [[x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y],
+              [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1], [x + 1, y + 1]];
+  for (const [nx, ny] of nb) {
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+    const ni = idx(nx, ny);
+    if (grid[ni] === FIRE || grid[ni] === LAVA) {
+      explosionQueue.push({x: x, y: y, r: 5});
+      next[i] = EMPTY; return;
+    }
+  }
+  if (temp[i] > 200) { explosionQueue.push({x: x, y: y, r: 5}); next[i] = EMPTY; return; }
+  updateSand(x, y, i);
+}
+
+// === Температура ===
+function updateTemperatures() {
+  const phaseChanges = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = idx(x, y), cell = grid[i];
+      if (cell === FIRE) {
+        const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+        for (const [dx, dy] of dirs) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const ni = idx(nx, ny);
+          if (grid[ni] === STONE) {
+            temp[ni] += 0.42;
+            if (temp[ni] >= 1000) phaseChanges.push({i: ni, c: LAVA, t: temp[ni]});
+          }
+          if (grid[ni] === EMPTY) { temp[ni] += 1.5; if (temp[ni] > 800) temp[ni] = 800; }
+          if (grid[ni] === WATER && Math.random() < 0.1) {
+            phaseChanges.push({i: ni, c: STEAM, t: 150});
+            life[ni] = 100 + Math.floor(Math.random() * 50);
+          }
+        }
+      }
+      if (cell === LAVA) {
+        const r = 3;
+        let touchedWater = false;
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            if (dx * dx + dy * dy > r * r + 1) continue;
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+            const ni = idx(nx, ny), nc = grid[ni];
+            if (nc === STONE) {
+              temp[ni] += 100;
+              if (temp[ni] >= 1000) phaseChanges.push({i: ni, c: LAVA, t: temp[ni]});
+            } else if (nc === ICE) phaseChanges.push({i: ni, c: WATER, t: 20});
+            else if (nc === PLANT) { phaseChanges.push({i: ni, c: FIRE, t: 800}); life[ni] = 15 + Math.floor(Math.random() * 10); }
+            else if (nc === WATER) { touchedWater = true; phaseChanges.push({i: ni, c: EMPTY, t: 20}); temp[i] -= 200; }
+            else if (nc === OIL) { phaseChanges.push({i: ni, c: FIRE, t: 800}); life[ni] = 35 + Math.floor(Math.random() * 20); }
+            else if (nc === GUNPOWDER) explosionQueue.push({x: nx, y: ny, r: 5});
+            else if (nc === EMPTY) { temp[ni] += 3; if (temp[ni] > 2000) temp[ni] = 2000; }
+          }
+        }
+        if (touchedWater && Math.random() < 0.5) phaseChanges.push({i: i, c: STONE, t: 600});
+        temp[i] -= 10;
+        if (temp[i] < 900 && !touchedWater) phaseChanges.push({i: i, c: STONE, t: temp[i]});
+      }
+      if (cell === WATER && temp[i] > 100 && Math.random() < 0.08) {
+        phaseChanges.push({i: i, c: STEAM, t: 150});
+        life[i] = 100 + Math.floor(Math.random() * 50);
+      }
+      if (cell === OIL && temp[i] > 200 && Math.random() < 0.15) {
+        phaseChanges.push({i: i, c: FIRE, t: 800});
+        life[i] = 35 + Math.floor(Math.random() * 20);
+      }
+    }
+  }
+  // Диффузия воздуха
+  const tb = new Float32Array(temp);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = idx(x, y);
+      if (grid[i] !== EMPTY) continue;
+      let sum = temp[i], cnt = 1;
+      if (x > 0) { sum += temp[idx(x - 1, y)]; cnt++; }
+      if (x < cols - 1) { sum += temp[idx(x + 1, y)]; cnt++; }
+      if (y > 0) { sum += temp[idx(x, y - 1)] * 1.3; cnt += 1.3; }
+      if (y < rows - 1) { sum += temp[idx(x, y + 1)] * 0.7; cnt += 0.7; }
+      tb[i] = sum / cnt;
+    }
+  }
+  temp.set(tb);
+  // Остывание
+  for (let i = 0; i < temp.length; i++) {
+    if (grid[i] === EMPTY) { temp[i] -= 0.5; if (temp[i] < 20) temp[i] = 20; }
+    if (grid[i] === STONE && temp[i] > 20) { temp[i] -= 2; if (temp[i] < 20) temp[i] = 20; }
+  }
+  // Лёд тает
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] === ICE && temp[i] > 0) phaseChanges.push({i: i, c: WATER, t: 20});
+  }
+  for (const ch of phaseChanges) { grid[ch.i] = ch.c; temp[ch.i] = ch.t; }
+}
+
+// === Спавнер ===
+function updateSpawner(x, y, i) {
+  const st = spawnerType[i];
+  if (st === 0) return;
+  if (Math.random() < 0.3) {
+    const dirs = [[0, -1], [-1, -1], [1, -1], [-1, 0], [1, 0]];
+    for (const [dx, dy] of dirs) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny);
+      if (grid[ni] !== EMPTY) continue;
+      grid[ni] = st;
+      if (st === FIRE) { life[ni] = 15 + Math.floor(Math.random() * 10); temp[ni] = 800; }
+      else if (st === LAVA) temp[ni] = 5000;
+      else if (st === ICE) temp[ni] = -50;
+      else if (st === STEAM) { life[ni] = 100 + Math.floor(Math.random() * 50); temp[ni] = 150; }
+      else if (st === SMOKE) { life[ni] = 60 + Math.floor(Math.random() * 40); temp[ni] = 100; }
+      else temp[ni] = 20;
+      return;
+    }
+  }
+}
+
+// === ИИ-курсор ===
+let aiCursor = null;
+const AI_MODES = ['build', 'destroy', 'plant', 'burn', 'flood', 'lava', 'oilspill', 'gunpowder'];
+const AI_NAMES = {build: 'строит', destroy: 'ломает', plant: 'сажает', burn: 'поджигает',
+  flood: 'затапливает', lava: 'заливает лавой', oilspill: 'разливает масло', gunpowder: 'минирует'};
+
+function toggleAI() {
+  if (aiCursor) { aiCursor = null; }
+  else {
+    aiCursor = {
+      x: canvas.width / 2, y: canvas.height / 3,
+      vx: 0, vy: 0, mode: 'build', modeTimer: 0, modeDuration: 150,
+      buildX: 0, buildY: 0, buildW: 0, buildH: 0, buildPhase: 0,
+      targetX: 0, targetY: 0,
+    };
+    pickAIIntent();
+  }
+  const b = document.getElementById('btn-ai');
+  b.textContent = 'ИИ: ' + (aiCursor ? 'ВКЛ' : 'ВЫКЛ');
+  b.classList.toggle('active', !!aiCursor);
+}
+
+function pickAIIntent() {
+  if (!aiCursor) return;
+  aiCursor.mode = AI_MODES[Math.floor(Math.random() * AI_MODES.length)];
+  aiCursor.modeTimer = 0;
+  aiCursor.modeDuration = 120 + Math.floor(Math.random() * 120);
+  const m = aiCursor.mode;
+  if (m === 'build') {
+    aiCursor.buildX = 50 + Math.floor(Math.random() * (cols - 100));
+    aiCursor.buildY = rows - 3;
+    aiCursor.buildW = 20 + Math.floor(Math.random() * 30);
+    aiCursor.buildH = 8 + Math.floor(Math.random() * 15);
+    aiCursor.buildPhase = 0;
+  } else if (m === 'destroy' || m === 'burn') {
+    let bX = -1, bY = -1, bC = 0;
+    for (let a = 0; a < 30; a++) {
+      const sx = Math.floor(Math.random() * cols);
+      const sy = Math.floor(Math.random() * (rows - 5));
+      let c = 0;
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+        const nx = sx + dx, ny = sy + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const cl = grid[idx(nx, ny)];
+        if (m === 'destroy') {
+          if (cl === STONE || cl === PLANT || cl === ICE || cl === SPAWNER || cl === GUNPOWDER || cl === OIL) c++;
+        } else {
+          if (cl === PLANT || cl === OIL) c++;
+        }
+      }
+      if (c > bC) { bC = c; bX = sx; bY = sy; }
+    }
+    if (bX >= 0) { aiCursor.targetX = bX * CELL; aiCursor.targetY = bY * CELL; }
+    else { aiCursor.targetX = 50 + Math.floor(Math.random() * (canvas.width - 100)); aiCursor.targetY = canvas.height - 60; }
+  } else {
+    aiCursor.targetX = 50 + Math.floor(Math.random() * (canvas.width - 100));
+    aiCursor.targetY = canvas.height / 2 + Math.random() * 100;
+  }
+}
+
+function updateAICursor() {
+  if (!aiCursor) return;
+  const ai = aiCursor;
+  ai.modeTimer++;
+  if (ai.modeTimer >= ai.modeDuration) pickAIIntent();
+  const m = ai.mode;
+  if (m === 'build') {
+    const tx = (ai.buildX + Math.min(ai.buildPhase, ai.buildW)) * CELL;
+    const ty = (ai.buildY - Math.floor(ai.buildPhase / ai.buildW)) * CELL;
+    if (ai.buildPhase < ai.buildW * ai.buildH) {
+      ai.vx = (tx - ai.x) * 0.08; ai.vy = (ty - ai.y) * 0.08;
+      ai.x += ai.vx; ai.y += ai.vy;
+      const cx = Math.floor(ai.x / CELL), cy = Math.floor(ai.y / CELL);
+      if (cx >= 0 && cx < cols && cy >= 0 && cy < rows && grid[idx(cx, cy)] === EMPTY) {
+        grid[idx(cx, cy)] = STONE; temp[idx(cx, cy)] = 20;
+      }
+      ai.buildPhase++;
+    } else pickAIIntent();
+  } else if (m === 'destroy') {
+    ai.vx = (ai.targetX - ai.x) * 0.05; ai.vy = (ai.targetY - ai.y) * 0.05;
+    ai.vx += (Math.random() - 0.5) * 0.5; ai.vy += (Math.random() - 0.5) * 0.5;
+    ai.x += ai.vx; ai.y += ai.vy;
+    const cx = Math.floor(ai.x / CELL), cy = Math.floor(ai.y / CELL), r = 2;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r + 1) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny), c = grid[ni];
+      if (c === STONE || c === PLANT || c === ICE || c === SPAWNER || c === SAND || c === GUNPOWDER || c === OIL) {
+        grid[ni] = EMPTY; life[ni] = 0; temp[ni] = 20; spawnerType[ni] = 0;
+      }
+    }
+  } else if (m === 'plant') {
+    ai.vx = (ai.targetX - ai.x) * 0.04; ai.vy = (ai.targetY - ai.y) * 0.04;
+    ai.x += ai.vx + (Math.random() - 0.5) * 0.8; ai.y += ai.vy + (Math.random() - 0.5) * 0.5;
+    const cx = Math.floor(ai.x / CELL), cy = Math.floor(ai.y / CELL), r = 2;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r + 1) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      if (grid[idx(nx, ny)] === EMPTY) { grid[idx(nx, ny)] = PLANT; temp[idx(nx, ny)] = 20; }
+    }
+  } else if (m === 'burn') {
+    ai.vx = (ai.targetX - ai.x) * 0.06; ai.vy = (ai.targetY - ai.y) * 0.06;
+    ai.vx += (Math.random() - 0.5) * 0.4; ai.vy += (Math.random() - 0.5) * 0.4;
+    ai.x += ai.vx; ai.y += ai.vy;
+    const cx = Math.floor(ai.x / CELL), cy = Math.floor(ai.y / CELL), r = 2;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r + 1) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny);
+      if (grid[ni] === PLANT || grid[ni] === OIL) {
+        grid[ni] = FIRE; life[ni] = 15 + Math.floor(Math.random() * 10); temp[ni] = 800;
+      }
+    }
+  } else if (m === 'flood' || m === 'lava' || m === 'oilspill' || m === 'gunpowder') {
+    ai.vx = (ai.targetX - ai.x) * 0.04; ai.vy = (ai.targetY - ai.y) * 0.04;
+    ai.x += ai.vx + (Math.random() - 0.5) * 0.6; ai.y += ai.vy + (Math.random() - 0.5) * 0.4;
+    const cx = Math.floor(ai.x / CELL), cy = Math.floor(ai.y / CELL);
+    if (cx >= 0 && cx < cols && cy >= 0 && cy < rows && grid[idx(cx, cy)] === EMPTY) {
+      if (m === 'flood') { grid[idx(cx, cy)] = WATER; temp[idx(cx, cy)] = 20; }
+      else if (m === 'lava') { grid[idx(cx, cy)] = LAVA; temp[idx(cx, cy)] = 5000; }
+      else if (m === 'oilspill') { grid[idx(cx, cy)] = OIL; temp[idx(cx, cy)] = 20; }
+      else if (m === 'gunpowder') { grid[idx(cx, cy)] = GUNPOWDER; temp[idx(cx, cy)] = 20; }
+    }
+  }
+  const mg = 30;
+  if (ai.x < mg) { ai.x = mg; ai.vx = Math.abs(ai.vx); }
+  if (ai.x > canvas.width - mg) { ai.x = canvas.width - mg; ai.vx = -Math.abs(ai.vx); }
+  if (ai.y < mg + 50) { ai.y = mg + 50; ai.vy = Math.abs(ai.vy); }
+  if (ai.y > canvas.height - 100) { ai.y = canvas.height - 100; ai.vy = -Math.abs(ai.vy); }
+}
+
+function drawAICursor() {
+  if (!aiCursor) return;
+  const x = aiCursor.x, y = aiCursor.y;
+  ctx.save();
+  ctx.strokeStyle = '#ff3344'; ctx.fillStyle = '#ff3344';
+  ctx.lineWidth = 2; ctx.shadowColor = '#ff3344'; ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + 14, y + 5); ctx.lineTo(x + 6, y + 8);
+  ctx.lineTo(x + 10, y + 16); ctx.lineTo(x + 7, y + 17); ctx.lineTo(x + 3, y + 10);
+  ctx.lineTo(x, y + 14); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.font = '11px Arial';
+  const lb = AI_NAMES[aiCursor.mode] || '';
+  const w = ctx.measureText(lb).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(x + 16, y - 16, w + 8, 16);
+  ctx.fillStyle = '#ff6677';
+  ctx.fillText(lb, x + 20, y - 4);
+  ctx.restore();
+}
+
+// === Сохранение / Загрузка ===
+function saveState() {
+  try {
+    const data = {
+      grid: Array.from(grid), temp: Array.from(temp),
+      life: Array.from(life), spawnerType: Array.from(spawnerType),
+      cols: cols, rows: rows,
+    };
+    localStorage.setItem('elements_save', JSON.stringify(data));
+    const b = document.getElementById('btn-save');
+    const old = b.textContent;
+    b.textContent = 'Сохранено!';
+    setTimeout(() => b.textContent = old, 1500);
+  } catch (e) { alert('Не удалось сохранить: ' + e.message); }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem('elements_save');
+    if (!raw) { alert('Нет сохранения'); return; }
+    const data = JSON.parse(raw);
+    if (data.cols !== cols || data.rows !== rows) { alert('Размер экрана изменился — сохранение не подходит'); return; }
+    grid.set(data.grid); temp.set(data.temp);
+    life.set(data.life); spawnerType.set(data.spawnerType);
+    const b = document.getElementById('btn-load');
+    const old = b.textContent;
+    b.textContent = 'Загружено!';
+    setTimeout(() => b.textContent = old, 1500);
+  } catch (e) { alert('Не удалось загрузить: ' + e.message); }
+}
+
+// === Миссии ===
+const MISSIONS = [
+  {id: 0, name: 'Нет', desc: '', check: function() { return 0; }},
+  {id: 1, name: 'Сохрани растение', desc: 'Посади растение и защити его от огня 30 секунд. Растение должно остаться живым.',
+    check: function(t) {
+      let plantCount = 0;
+      for (let i = 0; i < grid.length; i++) if (grid[i] === PLANT) plantCount++;
+      if (plantCount === 0) return -1;
+      const elapsed = (t - missionStartTime) / 60;
+      if (elapsed >= 30) return 1;
+      return elapsed / 30;
+    }},
+  {id: 2, name: 'Создай водопад', desc: 'Создай поток воды шириной 10+ клеток, падающий с высоты 30+ клеток.',
+    check: function() {
+      for (let x = 0; x < cols; x++) {
+        let run = 0;
+        for (let y = 0; y < rows; y++) {
+          if (grid[idx(x, y)] === WATER) run++;
+          else run = 0;
+          if (run >= 30) {
+            let w = 0;
+            for (let dx = -5; dx <= 5; dx++) {
+              const nx = x + dx;
+              if (nx >= 0 && nx < cols && grid[idx(nx, y)] === WATER) w++;
+            }
+            if (w >= 10) return 1;
+          }
+        }
+      }
+      return 0;
+    }},
+  {id: 3, name: 'Построй башню', desc: 'Построй башню из камня высотой 40+ клеток, шириной 3-8 клеток.',
+    check: function() {
+      for (let x = 0; x < cols; x++) {
+        let run = 0, maxRun = 0;
+        for (let y = 0; y < rows; y++) {
+          if (grid[idx(x, y)] === STONE) run++; else run = 0;
+          if (run > maxRun) maxRun = run;
+        }
+        if (maxRun >= 40) {
+          let w = 0;
+          for (let dx = -4; dx <= 4; dx++) {
+            const nx = x + dx;
+            if (nx >= 0 && nx < cols && grid[idx(nx, 0)] === STONE) w++;
+          }
+          if (w >= 3 && w <= 8) return 1;
+        }
+      }
+      return 0;
+    }},
+];
+
+let currentMission = 0;
+let missionStartTime = 0;
+
+function cycleMission() {
+  currentMission = (currentMission + 1) % MISSIONS.length;
+  const m = MISSIONS[currentMission];
+  const b = document.getElementById('btn-mission');
+  b.textContent = 'Миссия: ' + m.name;
+  const panel = document.getElementById('missionPanel');
+  if (currentMission === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  document.getElementById('mpName').textContent = m.name;
+  document.getElementById('mpDesc').textContent = m.desc;
+  missionStartTime = frameCount;
+}
+
+function updateMissionProgress() {
+  if (currentMission === 0) return;
+  const m = MISSIONS[currentMission];
+  const progress = m.check(frameCount);
+  const fill = document.getElementById('mpFill');
+  const status = document.getElementById('mpStatus');
+  if (progress === -1) {
+    fill.style.width = '100%';
+    fill.style.background = 'linear-gradient(90deg,#ff3333,#ff6633)';
+    status.textContent = 'Растение погибло! Переклюи миссию и попробуй ещё раз.';
+    status.style.color = '#ff6666';
+  } else if (progress >= 1) {
+    fill.style.width = '100%';
+    fill.style.background = 'linear-gradient(90deg,#33ff66,#3399ff)';
+    status.textContent = 'Миссия выполнена!';
+    status.style.color = '#33ff66';
+  } else {
+    fill.style.width = Math.min(progress * 100, 100) + '%';
+    fill.style.background = 'linear-gradient(90deg,#33ff66,#3399ff)';
+    status.textContent = 'Выполняется...';
+    status.style.color = '#aaa';
+  }
+}
+
+// === Отрисовка ===
+function draw() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = idx(x, y), cell = grid[i];
+      if (cell === EMPTY) {
+        const t = temp[i];
+        if (t > 100) {
+          const a = Math.min((t - 100) / 700, 0.15);
+          ctx.fillStyle = 'rgba(255,' + Math.floor(100 + 100 * a) + ',0,' + a + ')';
+          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+        continue;
+      }
+      if (cell === FIRE)       ctx.fillStyle = fireColor(life[i]);
+      else if (cell === SAND)  ctx.fillStyle = '#e8c44c';
+      else if (cell === WATER) ctx.fillStyle = '#2f7fd4';
+      else if (cell === PLANT) ctx.fillStyle = '#3ab54a';
+      else if (cell === STONE) ctx.fillStyle = stoneColor(temp[i]);
+      else if (cell === ICE)   ctx.fillStyle = iceColor(temp[i]);
+      else if (cell === LAVA)  ctx.fillStyle = lavaColor(temp[i]);
+      else if (cell === SPAWNER) ctx.fillStyle = spawnerColor(spawnerType[i]);
+      else if (cell === STEAM) {
+        const a = Math.min(life[i] / 100, 0.6);
+        ctx.fillStyle = 'rgba(200,220,240,' + a + ')';
+      }
+      else if (cell === OIL)   ctx.fillStyle = '#556633';
+      else if (cell === ACID)  ctx.fillStyle = '#88ff44';
+      else if (cell === GUNPOWDER) ctx.fillStyle = '#333333';
+      else if (cell === SMOKE) {
+        const a = Math.min(life[i] / 60, 0.5);
+        ctx.fillStyle = 'rgba(100,100,100,' + a + ')';
+      }
+      else ctx.fillStyle = '#555';
+      ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      if (cell === SPAWNER && spawnerType[i] > 0) {
+        ctx.fillStyle = 'rgba(136,204,255,0.3)';
+        ctx.fillRect(x * CELL - 1, y * CELL - 1, CELL + 2, CELL + 2);
+      }
+    }
+  }
+  drawAICursor();
+  if (sensorOn) {
+    const cx = Math.floor(mouseX / CELL), cy = Math.floor(mouseY / CELL);
+    if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+      const t = temp[idx(cx, cy)];
+      const label = Math.round(t) + '\u00b0C';
+      ctx.font = 'bold 14px Arial';
+      const w = ctx.measureText(label).width;
+      const bx = mouseX + 14, by = mouseY - 28;
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillRect(bx, by, w + 12, 22);
+      ctx.strokeStyle = tempColor(t);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, w + 12, 22);
+      ctx.fillStyle = tempColor(t);
+      ctx.fillText(label, bx + 6, by + 16);
+    }
+  }
+}
+
+// === Главный цикл ===
+function loop() {
+  if (!paused) {
+    step();
+    step();
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (grid[idx(x, y)] === SPAWNER) updateSpawner(x, y, idx(x, y));
+      }
+    }
+    updateTemperatures();
+    updateAICursor();
+    if (explosionQueue.length > 0) {
+      for (const ex of explosionQueue) explode(ex.x, ex.y, ex.r);
+      explosionQueue = [];
+    }
+    updateMissionProgress();
+  }
+  draw();
+  frameCount++;
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

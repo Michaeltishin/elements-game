@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Пиксельная песочница</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: Arial, sans-serif; }
+    #canvas { display: block; image-rendering: pixelated; }
+    .ui {
+      position: absolute; top: 10px; left: 10px;
+      color: #fff; pointer-events: auto; user-select: none; z-index: 10;
+    }
+    button {
+      padding: 10px 16px; margin-right: 8px; cursor: pointer;
+      background: #333; border: 2px solid #555; color: white;
+      font-size: 14px; transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover { background: #444; border-color: #777; }
+    button.active { background: #555; border-color: #999; }
+    #tool { margin-left: 12px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="ui">
+    <button id="btn-sand" class="active" onclick="setTool('sand')">Песок</button>
+    <button id="btn-water" onclick="setTool('water')">Вода</button>
+    <button id="btn-plant" onclick="setTool('plant')">Растение</button>
+    <button id="btn-erase" onclick="setTool('erase')">Ластик</button>
+    <span id="tool">Песок</span>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const CELL = 6; // размер клетки в пикселях
+    let cols, rows;
+    let grid;       // текущее состояние
+    let next;       // буфер для след. кадра
+
+    // Типы клеток
+    const EMPTY = 0, SAND = 1, WATER = 2, PLANT = 3;
+
+    // Цвета
+    const COLORS = {
+      [SAND]:   '#e8c44c',
+      [WATER]:  '#2f7fd4',
+      [PLANT]:  '#3ab54a',
+    };
+
+    function initGrid() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      cols = Math.floor(canvas.width / CELL);
+      rows = Math.floor(canvas.height / CELL);
+      grid = new Uint8Array(cols * rows);
+      next = new Uint8Array(cols * rows);
+    }
+    initGrid();
+    window.addEventListener('resize', initGrid);
+
+    let tool = 'sand';
+    function setTool(t) {
+      tool = t;
+      document.getElementById('tool').textContent =
+        t === 'sand' ? 'Песок' : t === 'water' ? 'Вода' :
+        t === 'plant' ? 'Растение' : 'Ластик';
+      document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      document.getElementById('btn-' + t).classList.add('active');
+    }
+
+    // Индекс клетки
+    function idx(x, y) { return y * cols + x; }
+
+    // Рисование мышью
+    let isDrawing = false;
+    let lastX = -1, lastY = -1;
+
+    function paintAt(px, py) {
+      const cx = Math.floor(px / CELL);
+      const cy = Math.floor(py / CELL);
+      if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) return;
+
+      // Радиус кисти
+      const r = tool === 'erase' ? 3 : 2;
+
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = cx + dx, y = cy + dy;
+          if (x < 0 || x >= cols || y < 0 || y >= rows) continue;
+          const i = idx(x, y);
+
+          if (tool === 'erase') {
+            grid[i] = EMPTY;
+          } else if (tool === 'plant') {
+            // Растение рисуется как цельный блок
+            grid[i] = PLANT;
+          } else if (tool === 'sand') {
+            if (grid[i] === EMPTY) grid[i] = SAND;
+          } else if (tool === 'water') {
+            if (grid[i] === EMPTY) grid[i] = WATER;
+          }
+        }
+      }
+    }
+
+    // Рисование линии между точками (чтобы не было разрывов)
+    function paintLine(x1, y1, x2, y2) {
+      const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+      const steps = Math.max(dx, dy);
+      if (steps === 0) { paintAt(x1, y1); return; }
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        paintAt(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+      }
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      isDrawing = true;
+      lastX = e.clientX; lastY = e.clientY;
+      paintAt(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => { isDrawing = false; lastX = lastY = -1; });
+    canvas.addEventListener('mousemove', e => {
+      if (!isDrawing) return;
+      paintLine(lastX, lastY, e.clientX, e.clientY);
+      lastX = e.clientX; lastY = e.clientY;
+    });
+
+    // Физика
+    function step() {
+      next.set(grid); // копируем текущее состояние
+
+      for (let y = rows - 1; y >= 0; y--) {
+        // Чередуем направление прохода по X, чтобы вода растекалась равномерно
+        const leftToRight = (frameCount % 2 === 0);
+        if (leftToRight) {
+          for (let x = 0; x < cols; x++) updateCell(x, y);
+        } else {
+          for (let x = cols - 1; x >= 0; x--) updateCell(x, y);
+        }
+      }
+
+      // Копируем результат обратно
+      grid.set(next);
+    }
+
+    function updateCell(x, y) {
+      const i = idx(x, y);
+      const cell = grid[i];
+      if (cell === EMPTY || cell === PLANT) return;
+
+      // Только песок и вода двигаются
+      if (cell === SAND) {
+        updateSand(x, y, i);
+      } else if (cell === WATER) {
+        updateWater(x, y, i);
+      }
+    }
+
+    function updateSand(x, y, i) {
+      // Песок падает вниз
+      if (y + 1 >= rows) return; // пол
+      const below = idx(x, y + 1);
+      if (grid[below] === EMPTY) {
+        next[i] = EMPTY;
+        next[below] = SAND;
+        return;
+      }
+
+      // Пробует по диагонали вниз (сыпучесть)
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols) continue;
+        const diag = idx(nx, y + 1);
+        if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) {
+          next[i] = EMPTY;
+          next[diag] = SAND;
+          return;
+        }
+      }
+    }
+
+    function updateWater(x, y, i) {
+      if (y + 1 >= rows) return; // пол
+
+      // Вниз
+      const below = idx(x, y + 1);
+      if (grid[below] === EMPTY) {
+        next[i] = EMPTY;
+        next[below] = WATER;
+        return;
+      }
+
+      // Диагональ вниз (заполнение неровностей)
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols) continue;
+        const diag = idx(nx, y + 1);
+        if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) {
+          next[i] = EMPTY;
+          next[diag] = WATER;
+          return;
+        }
+      }
+
+      // Растекание вбок (физика жидкости)
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols) continue;
+        const side = idx(nx, y);
+        if (grid[side] === EMPTY && next[side] === EMPTY) {
+          next[i] = EMPTY;
+          next[side] = WATER;
+          return;
+        }
+      }
+    }
+
+    // Отрисовка
+    function draw() {
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const cell = grid[idx(x, y)];
+          if (cell === EMPTY) continue;
+          ctx.fillStyle = COLORS[cell];
+          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+      }
+    }
+
+    let frameCount = 0;
+    function loop() {
+      // 2 шага физики за кадр — песок падает быстрее
+      step();
+      step();
+      draw();
+      frameCount++;
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

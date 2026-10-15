@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Пиксельная песочница</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: Arial, sans-serif; }
+    #canvas { display: block; image-rendering: pixelated; }
+    .ui {
+      position: absolute; top: 10px; left: 10px;
+      color: #fff; pointer-events: auto; user-select: none; z-index: 10;
+    }
+    button {
+      padding: 10px 16px; margin-right: 8px; cursor: pointer;
+      background: #333; border: 2px solid #555; color: white;
+      font-size: 14px; transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover { background: #444; border-color: #777; }
+    button.active { background: #555; border-color: #999; }
+    #tool { margin-left: 12px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="ui">
+    <button id="btn-sand" class="active" onclick="setTool('sand')">Песок</button>
+    <button id="btn-water" onclick="setTool('water')">Вода</button>
+    <button id="btn-plant" onclick="setTool('plant')">Растение</button>
+    <button id="btn-fire" onclick="setTool('fire')">Огонь</button>
+    <button id="btn-erase" onclick="setTool('erase')">Ластик</button>
+    <span id="tool">Песок</span>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const CELL = 6;
+    let cols, rows, grid, next, life;
+
+    const EMPTY = 0, SAND = 1, WATER = 2, PLANT = 3, FIRE = 4;
+
+    function initGrid() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      cols = Math.floor(canvas.width / CELL);
+      rows = Math.floor(canvas.height / CELL);
+      grid = new Uint8Array(cols * rows);
+      next = new Uint8Array(cols * rows);
+      life = new Int16Array(cols * rows);
+    }
+    initGrid();
+    window.addEventListener('resize', initGrid);
+
+    let tool = 'sand';
+
+    function setTool(t) {
+      tool = t;
+      document.getElementById('tool').textContent =
+        t === 'sand' ? 'Песок' : t === 'water' ? 'Вода' :
+        t === 'plant' ? 'Растение' : t === 'fire' ? 'Огонь' : 'Ластик';
+      document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      document.getElementById('btn-' + t).classList.add('active');
+    }
+
+    function idx(x, y) { return y * cols + x; }
+
+    // Рисование мышью
+    let isDrawing = false;
+    let lastPaintX = -1, lastPaintY = -1;
+
+    function paintAt(px, py) {
+      const cx = Math.floor(px / CELL);
+      const cy = Math.floor(py / CELL);
+      if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) return;
+
+      const r = tool === 'erase' ? 3 : 2;
+
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const x = cx + dx, y = cy + dy;
+          if (x < 0 || x >= cols || y < 0 || y >= rows) continue;
+          const i = idx(x, y);
+
+          if (tool === 'erase') {
+            grid[i] = EMPTY;
+            life[i] = 0;
+          } else if (tool === 'plant') {
+            if (grid[i] === EMPTY) grid[i] = PLANT;
+          } else if (tool === 'sand') {
+            if (grid[i] === EMPTY) grid[i] = SAND;
+          } else if (tool === 'water') {
+            if (grid[i] === EMPTY) grid[i] = WATER;
+          } else if (tool === 'fire') {
+            if (grid[i] === EMPTY || grid[i] === PLANT) {
+              grid[i] = FIRE;
+              life[i] = 15 + Math.floor(Math.random() * 10); // 15-25 кадров
+            }
+          }
+        }
+      }
+    }
+
+    function paintLine(x1, y1, x2, y2) {
+      const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+      const steps = Math.max(dx, dy);
+      if (steps === 0) { paintAt(x1, y1); return; }
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        paintAt(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+      }
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      isDrawing = true;
+      lastPaintX = e.clientX;
+      lastPaintY = e.clientY;
+      paintAt(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => { isDrawing = false; lastPaintX = lastPaintY = -1; });
+    canvas.addEventListener('mousemove', e => {
+      if (!isDrawing) return;
+      // Не рисуем, если курсор не сдвинулся — фикс "автоспавна на месте"
+      if (e.clientX === lastPaintX && e.clientY === lastPaintY) return;
+      paintLine(lastPaintX, lastPaintY, e.clientX, e.clientY);
+      lastPaintX = e.clientX;
+      lastPaintY = e.clientY;
+    });
+
+    // Цвет огня в зависимости от времени жизни
+    function fireColor(l) {
+      if (l > 18) return '#ff3300';
+      if (l > 12) return '#ff6600';
+      if (l > 7)  return '#ff9900';
+      if (l > 3)  return '#ffcc00';
+      return '#ffff00';
+    }
+
+    // Физика
+    let frameCount = 0;
+
+    function step() {
+      next.set(grid);
+
+      for (let y = rows - 1; y >= 0; y--) {
+        const leftToRight = (frameCount % 2 === 0);
+        if (leftToRight) {
+          for (let x = 0; x < cols; x++) updateCell(x, y);
+        } else {
+          for (let x = cols - 1; x >= 0; x--) updateCell(x, y);
+        }
+      }
+
+      grid.set(next);
+    }
+
+    function updateCell(x, y) {
+      const i = idx(x, y);
+      const cell = grid[i];
+      if (cell === EMPTY || cell === PLANT) return;
+
+      if (cell === SAND) {
+        updateSand(x, y, i);
+      } else if (cell === WATER) {
+        updateWater(x, y, i);
+      } else if (cell === FIRE) {
+        updateFire(x, y, i);
+      }
+    }
+
+    function updateSand(x, y, i) {
+      if (y + 1 >= rows) return;
+
+      const below = idx(x, y + 1);
+      if (grid[below] === EMPTY) {
+        next[i] = EMPTY;
+        next[below] = SAND;
+        return;
+      }
+
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols) continue;
+        const diag = idx(nx, y + 1);
+        if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) {
+          next[i] = EMPTY;
+          next[diag] = SAND;
+          return;
+        }
+      }
+    }
+
+    function updateWater(x, y, i) {
+      if (y + 1 >= rows) return;
+
+      const below = idx(x, y + 1);
+      if (grid[below] === EMPTY) {
+        next[i] = EMPTY;
+        next[below] = WATER;
+        return;
+      }
+
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols) continue;
+        const diag = idx(nx, y + 1);
+        if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) {
+          next[i] = EMPTY;
+          next[diag] = WATER;
+          return;
+        }
+      }
+
+      if (Math.random() < 0.4) {
+        for (const d of [dir, -dir]) {
+          const nx = x + d;
+          if (nx < 0 || nx >= cols) continue;
+          const side = idx(nx, y);
+          if (grid[side] === EMPTY && next[side] === EMPTY) {
+            next[i] = EMPTY;
+            next[side] = WATER;
+            return;
+          }
+        }
+      }
+    }
+
+    function updateFire(x, y, i) {
+      // Уменьшаем время жизни
+      life[i]--;
+      if (life[i] <= 0) {
+        next[i] = EMPTY;
+        life[i] = 0;
+        return;
+      }
+
+      // Соседи (8 направлений)
+      const neighbors = [
+        [x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y],
+        [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1], [x + 1, y + 1]
+      ];
+
+      // Поджигаем соседние растения — 35% шанс, чтобы огонь
+      // гарантированно распространялся по всему растению
+      for (const [nx, ny] of neighbors) {
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const ni = idx(nx, ny);
+        if (grid[ni] === PLANT && next[ni] === PLANT) {
+          if (Math.random() < 0.35) {
+            next[ni] = FIRE;
+            life[ni] = 15 + Math.floor(Math.random() * 10);
+          }
+        }
+      }
+
+      // Вода тушит огонь
+      for (const [nx, ny] of neighbors) {
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const ni = idx(nx, ny);
+        if (grid[ni] === WATER) {
+          life[i] -= 3;
+          if (Math.random() < 0.3) {
+            next[ni] = EMPTY;
+          }
+        }
+      }
+
+      // Огонь поднимается вверх
+      if (y - 1 >= 0) {
+        const above = idx(x, y - 1);
+        if (grid[above] === EMPTY && next[above] === EMPTY) {
+          next[above] = FIRE;
+          life[above] = life[i];
+          next[i] = EMPTY;
+          life[i] = 0;
+          return;
+        }
+      }
+
+      // По диагонали вверх (дрожание пламени)
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols || y - 1 < 0) continue;
+        const diag = idx(nx, y - 1);
+        if (grid[diag] === EMPTY && next[diag] === EMPTY) {
+          next[diag] = FIRE;
+          life[diag] = life[i];
+          next[i] = EMPTY;
+          life[i] = 0;
+          return;
+        }
+      }
+    }
+
+    // Отрисовка
+    function draw() {
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const i = idx(x, y);
+          const cell = grid[i];
+          if (cell === EMPTY) continue;
+
+          if (cell === FIRE) {
+            ctx.fillStyle = fireColor(life[i]);
+          } else if (cell === SAND) {
+            ctx.fillStyle = '#e8c44c';
+          } else if (cell === WATER) {
+            ctx.fillStyle = '#2f7fd4';
+          } else if (cell === PLANT) {
+            ctx.fillStyle = '#3ab54a';
+          }
+
+          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+      }
+    }
+
+    function loop() {
+      step();
+      step();
+      draw();
+      frameCount++;
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

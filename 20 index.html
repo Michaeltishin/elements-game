@@ -1,0 +1,2067 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elements</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: #1a1a1a; font-family: Arial, sans-serif;
+    display: flex; flex-direction: column;
+  }
+
+  /* Игровое поле. Панель инструментов лежит под ним и больше не перекрывает низ мира */
+  #stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  #canvas { position: absolute; left: 0; top: 0; display: block; touch-action: none; }
+
+  .title {
+    position: absolute; top: 10px; left: 14px; z-index: 10;
+    font-size: 22px; font-weight: bold; user-select: none; pointer-events: none;
+    background: linear-gradient(90deg, #ff3366, #ffaa00, #33ff66, #3399ff, #cc33ff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; letter-spacing: 2px;
+  }
+
+  /* Радужная надпись: с ней нельзя ничего сделать (не выделяется, не кликается, не таскается) */
+  .ver {
+    position: absolute; top: 10px; right: 14px; z-index: 20;
+    font-size: 24px; font-weight: bold; letter-spacing: 2px; white-space: nowrap;
+    pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-user-drag: none;
+    background: linear-gradient(90deg, #ff3366, #ffaa00, #ffee33, #33ff66, #33ccff, #9966ff, #ff33cc, #ff3366);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    animation: rainbow 4s linear infinite;
+  }
+  @keyframes rainbow { from { background-position: 0 0; } to { background-position: -200% 0; } }
+
+  .topbar {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; gap: 6px; pointer-events: auto;
+    user-select: none; flex-wrap: wrap; justify-content: center;
+    max-width: calc(100% - 20px);
+  }
+  .topbar button {
+    padding: 6px 12px; cursor: pointer; background: #2a2a2a;
+    border: 2px solid #444; color: #aaa; font-size: 12px; border-radius: 6px;
+    transition: all .15s;
+  }
+  .topbar button:hover { background: #383838; border-color: #666; color: #fff; }
+  .topbar button.active { background: #444; border-color: #888; color: #fff; }
+
+  .mp {
+    position: absolute; top: 48px; left: 50%; transform: translateX(-50%);
+    z-index: 10; background: rgba(0,0,0,.8); border-radius: 8px;
+    padding: 10px 18px; color: #fff; font-size: 13px; text-align: center;
+    min-width: 300px; display: none; cursor: pointer; user-select: none;
+  }
+  .mp .n { font-weight: bold; margin-bottom: 4px; }
+  .mp .d { font-size: 11px; color: #aaa; margin-bottom: 8px; }
+  .mp .b { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+  .mp .f { height: 100%; background: linear-gradient(90deg, #33ff66, #3399ff); transition: width .3s; width: 0; }
+  .mp .s { font-size: 11px; margin-top: 5px; }
+
+  .toolbar {
+    flex: 0 0 auto; z-index: 10; user-select: none;
+    display: flex; align-items: flex-end; justify-content: center; gap: 5px; flex-wrap: wrap;
+    padding: 10px 10px 12px; background: #0e0e0e; border-top: 1px solid #2a2a2a;
+    box-shadow: 0 -6px 30px rgba(0,0,0,.6);
+  }
+
+  .el-btn {
+    width: 52px; height: 60px; border-radius: 8px; cursor: pointer;
+    border: 2px solid #333; background: #1e1e1e; overflow: hidden;
+    display: flex; flex-direction: column; transition: all .15s; position: relative;
+  }
+  .el-btn:hover { border-color: #666; transform: translateY(-2px); }
+  .el-btn.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,.3); }
+  .el-btn.inactive { opacity: .4; }
+
+  .el-pv { width: 100%; height: 34px; display: flex; align-items: center; justify-content: center; }
+  .el-pv canvas { display: block; }
+  .el-lb { font-size: 9px; color: #ccc; text-align: center; padding: 2px 0 3px; background: rgba(0,0,0,.4); }
+
+  .br {
+    display: flex; align-items: center; gap: 6px; color: #aaa;
+    font-size: 12px; margin-left: 10px; padding-bottom: 8px;
+  }
+  .br input[type=range] { cursor: pointer; accent-color: #66aaff; width: 70px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="canvas"></canvas>
+  <div class="title">Elements</div>
+  <div class="ver" inert aria-hidden="true" draggable="false" oncontextmenu="return false" onselectstart="return false" ondragstart="return false">20 версия</div>
+  <div class="topbar">
+    <button id="btn-sensor" onclick="toggleSensor()">Датчик: ВЫКЛ</button>
+    <button id="btn-pause" onclick="togglePause()">Пауза: ВЫКЛ</button>
+    <button id="btn-ai" onclick="toggleAI()">ИИ: ВЫКЛ</button>
+    <button id="btn-save" onclick="saveState()">Сохранить</button>
+    <button id="btn-load" onclick="loadState()">Загрузить</button>
+    <button id="btn-mission" onclick="cycleMission()">Миссия: нет</button>
+  </div>
+  <div class="mp" id="missionPanel">
+    <div class="n" id="mpName"></div>
+    <div class="d" id="mpDesc"></div>
+    <div class="b"><div class="f" id="mpFill"></div></div>
+    <div class="s" id="mpStatus"></div>
+  </div>
+</div>
+<div class="toolbar" id="toolbar"></div>
+
+<script>
+'use strict';
+
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const canvas = $('canvas');
+const ctx = canvas.getContext('2d');
+
+const CELL = 6;                 // размер клетки в пикселях
+const TICK_MS = 1000 / 60;      // симуляция идёт 60 тиков в секунду на любом мониторе
+
+let cols = 0, rows = 0;
+let grid, next, life, temp, tempBuf, spawnerType, aiMade;
+let buf, bctx, img, px32;      // буфер для быстрой отрисовки (1 пиксель = 1 клетка)
+
+// ===== ТИПЫ ЭЛЕМЕНТОВ =====
+const EMPTY=0, SAND=1, WATER=2, PLANT=3, FIRE=4, STONE=5, ICE=6, LAVA=7;
+const SPAWNER=8, STEAM=9, OIL=10, ACID=11, GUNPOWDER=12, SMOKE=13, WIND=14;
+const IRON=15, GOLD=16, MOLTEN_IRON=17, MOLTEN_GOLD=18;
+const COOL_TOOL = 99;     // служебный номер для значка инструмента "Холод" (в сетке не используется)
+
+// Неподвижные типы: их не нужно обновлять в step()
+const IS_STATIC = new Uint8Array(32);
+[EMPTY, PLANT, STONE, ICE, SPAWNER, WIND, IRON, GOLD].forEach(c => { IS_STATIC[c] = 1; });
+
+// Соседи (без создания массивов на каждый вызов)
+const DX4 = [0, 0, -1, 1],  DY4 = [-1, 1, 0, 0];
+const DX8 = [-1, 0, 1, -1, 1, -1, 0, 1], DY8 = [-1, -1, -1, 0, 0, 1, 1, 1];
+
+// ===== СПИСОК ЭЛЕМЕНТОВ =====
+const ELEMENTS = [
+  {id:'sand',      name:'Песок',    cell:SAND},
+  {id:'water',     name:'Вода',     cell:WATER},
+  {id:'plant',     name:'Растение', cell:PLANT},
+  {id:'stone',     name:'Камень',   cell:STONE},
+  {id:'iron',      name:'Железо',   cell:IRON},
+  {id:'gold',      name:'Золото',   cell:GOLD},
+  {id:'ice',       name:'Лёд',      cell:ICE},
+  {id:'fire',      name:'Огонь',    cell:FIRE},
+  {id:'lava',      name:'Лава',     cell:LAVA},
+  {id:'oil',       name:'Масло',    cell:OIL},
+  {id:'acid',      name:'Кислота',  cell:ACID},
+  {id:'gunpowder', name:'Порох',    cell:GUNPOWDER},
+  {id:'steam',     name:'Пар',      cell:STEAM},
+  {id:'smoke',     name:'Дым',      cell:SMOKE},
+  {id:'wind',      name:'Ветер',    cell:WIND},
+  {id:'spawner',   name:'Спавнер',  cell:SPAWNER},
+  {id:'cool',      name:'Холод',    cell:COOL_TOOL},
+  {id:'erase',     name:'Ластик',   cell:EMPTY},
+];
+
+const CELL_MAP = {
+  sand:SAND, water:WATER, plant:PLANT, stone:STONE, iron:IRON, gold:GOLD, ice:ICE,
+  fire:FIRE, lava:LAVA, oil:OIL, acid:ACID, gunpowder:GUNPOWDER,
+  steam:STEAM, smoke:SMOKE, wind:WIND,
+};
+
+// ===== СОСТОЯНИЕ =====
+let tool = 'sand';
+let brushSize = 2;
+let mouseX = -100, mouseY = -100;
+let sensorOn = false;
+let paused = false;
+let windX = 0;
+let simTick = 0;        // тики симуляции (не идут на паузе)
+let stepCount = 0;      // шаги физики (по ним чередуется направление обхода)
+let explosionQueue = [];
+let aiCursor = null;
+let isDrawing = false, lastPaintX = 0, lastPaintY = 0;
+
+const rnd = n => Math.floor(Math.random() * n);
+const idx = (x, y) => y * cols + x;
+
+// ===== РАБОТА С КЛЕТКАМИ =====
+function defaultLife(c) {
+  if (c === FIRE)  return 15 + rnd(10);
+  if (c === STEAM) return 100 + rnd(50);
+  if (c === SMOKE) return 60 + rnd(40);
+  return 0;
+}
+function defaultTemp(c) {
+  switch (c) {
+    case FIRE:  return 800;
+    case LAVA:  return 5000;
+    case ICE:   return -50;
+    case STEAM: return 150;
+    case SMOKE: return 100;
+    default:    return 20;
+  }
+}
+// Ставит клетку и ВСЕГДА сбрасывает "хвосты" (life, temp, spawnerType).
+// Раньше там оставался мусор, из-за чего свежий порох мог сам взорваться.
+function setCell(i, c, l, t) {
+  grid[i] = c;
+  life[i] = (l === undefined) ? defaultLife(c) : l;
+  temp[i] = (t === undefined) ? defaultTemp(c) : t;
+  if (c !== SPAWNER) spawnerType[i] = 0;
+  aiMade[i] = 0;
+}
+function clearCell(i, t) {
+  grid[i] = EMPTY; life[i] = 0; temp[i] = (t === undefined) ? 20 : t; spawnerType[i] = 0; aiMade[i] = 0;
+}
+
+// ===== ИНИЦИАЛИЗАЦИЯ / РАЗМЕР =====
+// Копирует старый мир в новый, выравнивая по левому нижнему углу (чтобы "пол" остался на месте)
+function copyBottomLeft(src, sc, sr, dst, dc, dr) {
+  const oy = dr - sr, w = Math.min(sc, dc);
+  for (let y = 0; y < sr; y++) {
+    const ty = y + oy;
+    if (ty < 0 || ty >= dr) continue;
+    for (let x = 0; x < w; x++) dst[ty * dc + x] = src[y * sc + x];
+  }
+}
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (w < CELL * 4 || h < CELL * 4) return;
+  if (grid && w === canvas.width && h === canvas.height) return;
+
+  const oc = cols, orr = rows, og = grid, ol = life, ot = temp, os = spawnerType, oa = aiMade;
+  canvas.width = w; canvas.height = h;
+  cols = Math.floor(w / CELL); rows = Math.floor(h / CELL);
+
+  grid = new Uint8Array(cols * rows);
+  next = new Uint8Array(cols * rows);
+  life = new Int16Array(cols * rows);
+  temp = new Float32Array(cols * rows).fill(20);
+  tempBuf = new Float32Array(cols * rows);
+  spawnerType = new Uint8Array(cols * rows);
+  aiMade = new Uint8Array(cols * rows);
+
+  // При изменении размера окна мир больше не стирается
+  if (og) {
+    copyBottomLeft(og, oc, orr, grid, cols, rows);
+    copyBottomLeft(ol, oc, orr, life, cols, rows);
+    copyBottomLeft(ot, oc, orr, temp, cols, rows);
+    copyBottomLeft(os, oc, orr, spawnerType, cols, rows);
+    copyBottomLeft(oa, oc, orr, aiMade, cols, rows);
+    aiShift(rows - orr);
+  }
+
+  buf = document.createElement('canvas');
+  buf.width = cols; buf.height = rows;
+  bctx = buf.getContext('2d');
+  img = bctx.createImageData(cols, rows);
+  px32 = new Uint32Array(img.data.buffer);
+  explosionQueue = [];
+}
+
+// ===== ПРЕВЬЮ ДЛЯ КНОПОК =====
+function drawPreview(cell) {
+  const pc = document.createElement('canvas');
+  pc.width = 48; pc.height = 34;
+  const p = pc.getContext('2d');
+  p.fillStyle = '#1e1e1e';
+  p.fillRect(0, 0, 48, 34);
+
+  if (cell === EMPTY) {
+    p.strokeStyle = '#ff4444'; p.lineWidth = 3;
+    p.beginPath();
+    p.moveTo(12, 8); p.lineTo(36, 26);
+    p.moveTo(36, 8); p.lineTo(12, 26);
+    p.stroke();
+    return pc;
+  }
+  if (cell === COOL_TOOL) {
+    for (let yy = 0; yy < 34; yy++) {
+      p.fillStyle = 'rgb(' + (27 + yy * 5) + ',' + (111 + yy * 3) + ',' + (181 + yy) + ')';
+      p.fillRect(0, 33 - yy, 48, 1);
+    }
+    p.fillStyle = '#ffffff'; p.font = 'bold 16px Arial';
+    p.fillText('0\u00b0', 14, 23);
+    return pc;
+  }
+  if (cell === SPAWNER) {
+    p.fillStyle = '#444'; p.fillRect(0, 0, 48, 34);
+    p.fillStyle = '#666';
+    for (let y = 2; y < 32; y += 5)
+      for (let x = 2; x < 46; x += 5)
+        if (Math.random() < 0.3) p.fillRect(x, y, 4, 4);
+    p.fillStyle = '#88ccff';
+    p.shadowColor = '#3399ff'; p.shadowBlur = 6;
+    p.fillRect(21, 14, 6, 6);
+    return pc;
+  }
+  if (cell === WIND) {
+    for (let y = 0; y < 34; y++)
+      for (let x = 0; x < 48; x++) {
+        const v = (Math.sin(x * 0.3 + y * 0.2) * 0.5 + 0.5) * 0.4 + 0.1;
+        p.fillStyle = 'rgba(150,220,255,' + v + ')';
+        p.fillRect(x, y, 1, 1);
+      }
+    p.fillStyle = '#fff'; p.font = 'bold 14px Arial';
+    p.fillText('~', 18, 22); p.fillText('~', 28, 22);
+    return pc;
+  }
+  const ps = 4;
+  for (let py = 0; py < 34; py += ps) {
+    for (let px = 0; px < 48; px += ps) {
+      const r = Math.random();
+      let c;
+      if (cell === FIRE)        c = r<.3?'#ff3300':r<.6?'#ff9900':'#ffcc00';
+      else if (cell === LAVA)   c = r<.3?'#ffee44':r<.6?'#ff7700':'#cc3300';
+      else if (cell === STONE)  c = r<.2?'#777':r<.5?'#888':'#999';
+      else if (cell === SAND)   c = r<.2?'#d8b43c':r<.6?'#e8c44c':'#f0d45c';
+      else if (cell === WATER)  c = r<.2?'#2770c4':r<.6?'#2f7fd4':'#378fe0';
+      else if (cell === ICE)    c = r<.2?'#98d0e8':r<.6?'#a8e0f0':'#b8eaf8';
+      else if (cell === PLANT)  c = r<.2?'#2aa53a':r<.6?'#3ab54a':'#4ac55a';
+      else if (cell === STEAM)  c = r<.3?'#b0c8e0':r<.6?'#c8dcf0':'#d8e8f8';
+      else if (cell === OIL)    c = r<.2?'#445522':r<.6?'#556633':'#667744';
+      else if (cell === ACID)   c = r<.2?'#66dd22':r<.6?'#88ff44':'#aaff66';
+      else if (cell === IRON)   c = r<.3?'#868c94':r<.6?'#969ca4':'#a6acb4';
+      else if (cell === GOLD)   c = r<.3?'#e6b422':r<.6?'#ffcd28':'#ffe066';
+      else if (cell === GUNPOWDER) c = r<.2?'#222':r<.5?'#333':'#444';
+      else if (cell === SMOKE)  c = r<.3?'#555':r<.6?'#666':'#777';
+      else c = '#555';
+      p.fillStyle = c;
+      p.fillRect(px, py, ps, ps);
+    }
+  }
+  return pc;
+}
+
+// ===== ПАНЕЛЬ ИНСТРУМЕНТОВ =====
+function buildToolbar() {
+  const tb = $('toolbar');
+  tb.innerHTML = '';
+  for (const el of ELEMENTS) {
+    const btn = document.createElement('div');
+    btn.className = 'el-btn' + (el.id === tool ? ' active' : '');
+    btn.id = 'btn-' + el.id;
+    btn.onclick = () => setTool(el.id);
+    const pv = document.createElement('div');
+    pv.className = 'el-pv';
+    pv.appendChild(drawPreview(el.cell));
+    const lb = document.createElement('div');
+    lb.className = 'el-lb';
+    lb.textContent = el.name;
+    btn.appendChild(pv);
+    btn.appendChild(lb);
+    tb.appendChild(btn);
+  }
+  const br = document.createElement('div');
+  br.className = 'br';
+  br.innerHTML = 'Кисть:<input type="range" id="brushSize" min="1" max="12" value="2"><span id="bv">2</span>';
+  const wd = document.createElement('div');
+  wd.className = 'br';
+  wd.innerHTML = 'Ветер:<input type="range" id="windSlider" min="-5" max="5" value="0"><span id="wv">0</span>';
+  tb.appendChild(br);
+  tb.appendChild(wd);
+  $('brushSize').oninput = e => {
+    brushSize = +e.target.value;
+    $('bv').textContent = brushSize;
+  };
+  $('windSlider').oninput = e => {
+    windX = +e.target.value;
+    $('wv').textContent = windX;
+  };
+}
+
+function setTool(t) {
+  tool = (tool === t) ? null : t;
+  document.querySelectorAll('.el-btn').forEach(b => {
+    b.classList.remove('active');
+    b.classList.add('inactive');
+  });
+  if (tool) {
+    const b = $('btn-' + tool);
+    if (b) { b.classList.add('active'); b.classList.remove('inactive'); }
+  } else {
+    document.querySelectorAll('.el-btn').forEach(b => b.classList.remove('inactive'));
+  }
+}
+
+function flash(btn, text) {
+  if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+  btn.textContent = text;
+  clearTimeout(btn._t);
+  btn._t = setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
+}
+
+function toggleSensor() {
+  sensorOn = !sensorOn;
+  const b = $('btn-sensor');
+  b.textContent = 'Датчик: ' + (sensorOn ? 'ВКЛ' : 'ВЫКЛ');
+  b.classList.toggle('active', sensorOn);
+}
+function togglePause() {
+  paused = !paused;
+  const b = $('btn-pause');
+  b.textContent = 'Пауза: ' + (paused ? 'ВКЛ' : 'ВЫКЛ');
+  b.classList.toggle('active', paused);
+}
+
+// ===== РИСОВАНИЕ (мышь, палец, стилус) =====
+function paintAt(px, py) {
+  if (!tool) return;
+  const cx = Math.floor(px / CELL), cy = Math.floor(py / CELL);
+  if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) return;
+
+  // Ластиком можно "стереть" ИИ-курсор
+  if (tool === 'erase' && aiCursor) {
+    const dx = px - aiCursor.x, dy = py - aiCursor.y;
+    if (dx * dx + dy * dy < (brushSize * CELL + 12) ** 2) {
+      aiCursor = null;
+      const b = $('btn-ai');
+      b.textContent = 'ИИ: ВЫКЛ';
+      b.classList.remove('active');
+    }
+  }
+
+  const r = brushSize;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r + 1) continue;
+      const x = cx + dx, y = cy + dy;
+      if (x < 0 || x >= cols || y < 0 || y >= rows) continue;
+      const i = idx(x, y);
+      const g = grid[i];
+      if (tool === 'erase') {
+        clearCell(i);
+      } else if (tool === 'cool') {
+        // Мгновенное остывание: клетка сразу получает 0 градусов (потом медленно теплеет до комнатной)
+        temp[i] = 0;
+        if (g === FIRE) clearCell(i, 0);             // огонь гаснет
+        else if (g === GUNPOWDER) life[i] = 0;       // тлеющий порох гаснет
+      } else if (tool === 'spawner') {
+        if (g === EMPTY) { setCell(i, SPAWNER); spawnerType[i] = 0; }
+      } else if (tool === 'fire') {
+        if (g === EMPTY || g === PLANT) setCell(i, FIRE);
+        else if (g === ICE) setCell(i, WATER);
+        else if (g === OIL) setCell(i, FIRE, 35 + rnd(20));
+        else if (g === SPAWNER) spawnerType[i] = FIRE;
+        else if (g === GUNPOWDER && life[i] === 0) life[i] = 15 + rnd(10);
+      } else {
+        if (g === EMPTY) setCell(i, CELL_MAP[tool]);
+        else if (g === SPAWNER && CELL_MAP[tool]) spawnerType[i] = CELL_MAP[tool];
+      }
+    }
+  }
+}
+
+function paintLine(x1, y1, x2, y2) {
+  const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+  const steps = Math.max(1, Math.ceil(dist / (CELL * 0.5)));
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    paintAt(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+  }
+}
+
+function pointerPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+canvas.addEventListener('pointerdown', e => {
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* не критично */ }
+  const p = pointerPos(e);
+  isDrawing = true;
+  mouseX = lastPaintX = p.x; mouseY = lastPaintY = p.y;
+  paintAt(p.x, p.y);
+});
+canvas.addEventListener('pointermove', e => {
+  const p = pointerPos(e);
+  mouseX = p.x; mouseY = p.y;
+  if (!isDrawing) return;
+  paintLine(lastPaintX, lastPaintY, p.x, p.y);
+  lastPaintX = p.x; lastPaintY = p.y;
+});
+const stopDrawing = () => { isDrawing = false; };
+canvas.addEventListener('pointerup', stopDrawing);
+canvas.addEventListener('pointercancel', stopDrawing);
+canvas.addEventListener('lostpointercapture', stopDrawing);
+canvas.addEventListener('pointerleave', () => { if (!isDrawing) { mouseX = mouseY = -100; } });
+
+// ===== ЦВЕТА (упакованные в число, чтобы рисовать через ImageData) =====
+function pack(r, g, b) { return (255 << 24) | (b << 16) | (g << 8) | r; }
+function hexRGB(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
+function hex(h) { const c = hexRGB(h); return pack(c[0], c[1], c[2]); }
+const BG_R = 26, BG_G = 26, BG_B = 26;
+// Полупрозрачный цвет поверх фона
+function mix(r, g, b, a) {
+  return pack((BG_R + (r - BG_R) * a) | 0, (BG_G + (g - BG_G) * a) | 0, (BG_B + (b - BG_B) * a) | 0);
+}
+
+const C_BG = pack(BG_R, BG_G, BG_B);
+const C_SAND = hex('#e8c44c'), C_WATER = hex('#2f7fd4'), C_PLANT = hex('#3ab54a');
+const C_OIL = hex('#556633'), C_ACID = hex('#88ff44'), C_UNKNOWN = hex('#555555');
+const C_FIRE = ['#ff3300', '#ff6600', '#ff9900', '#ffcc00', '#ffff00'].map(hex);
+const C_STONE = ['#ff5533', '#aa6644', '#997755', '#888888'].map(hex);
+const C_ICE = [hex('#c8eef8'), hex('#a8e0f0')];
+const C_LAVA = ['#ffee44', '#ffaa00', '#ff7700', '#ff4400', '#cc3300'].map(hex);
+const C_GUN = [hex('#ff4444'), hex('#661111'), hex('#333333')];
+
+function fireColor(l) { return l > 18 ? C_FIRE[0] : l > 12 ? C_FIRE[1] : l > 7 ? C_FIRE[2] : l > 3 ? C_FIRE[3] : C_FIRE[4]; }
+function stoneColor(t) { return t > 800 ? C_STONE[0] : t > 500 ? C_STONE[1] : t > 200 ? C_STONE[2] : C_STONE[3]; }
+function iceColor(t) { return t > -10 ? C_ICE[0] : C_ICE[1]; }
+function lavaColor(t) { return t > 4000 ? C_LAVA[0] : t > 3000 ? C_LAVA[1] : t > 2000 ? C_LAVA[2] : t > 1000 ? C_LAVA[3] : C_LAVA[4]; }
+function gunpowderColor(l) {
+  if (l > 0) return Math.sin(simTick * 0.8) > 0 ? C_GUN[0] : C_GUN[1];
+  return C_GUN[2];
+}
+function windColor() {
+  const p = Math.sin(simTick * 0.15) * 0.3 + 0.7;
+  return mix(150, 220, 255, p);
+}
+
+// Цвета спавнера по типу. Раньше цвета для огня, камня и льда были перепутаны.
+const SPAWNER_BASE = {
+  0:'#555555', 1:'#e8c44c', 2:'#2f7fd4', 3:'#3ab54a', 4:'#ff6600', 5:'#888888',
+  6:'#a8e0f0', 7:'#ff4400', 9:'#c8dcf0', 10:'#556633', 11:'#88ff44',
+  12:'#333333', 13:'#888888', 14:'#96dcff', 15:'#969ca4', 16:'#ffcd28', 17:'#ff9a30', 18:'#ffd23c'
+};
+const SPAWNER_COL = new Int32Array(32).fill(C_UNKNOWN);
+for (const k in SPAWNER_BASE) {
+  const c = hexRGB(SPAWNER_BASE[k]);
+  // активный спавнер слегка подсвечен голубым
+  SPAWNER_COL[k] = (+k > 0)
+    ? pack((c[0] + (136 - c[0]) * 0.3) | 0, (c[1] + (204 - c[1]) * 0.3) | 0, (c[2] + (255 - c[2]) * 0.3) | 0)
+    : pack(c[0], c[1], c[2]);
+}
+
+// Цвет текста датчика температуры (обычная CSS-строка)
+function tempColor(t) {
+  if (t < -100) return '#3399ff';
+  if (t < 0) return '#66ccff';
+  if (t < 100) return '#ffffff';
+  if (t < 500) return '#ffff66';
+  if (t < 1000) return '#ff9933';
+  if (t < 3000) return '#ff6600';
+  return '#ff3300';
+}
+
+// ===== ЦВЕТА МЕТАЛЛОВ И РАСКАЛЁННОГО СВЕЧЕНИЯ =====
+// Холодный металл слегка "рябит" (у каждой клетки свой оттенок), а нагретый светится: красный -> оранжевый -> жёлтый -> белый
+const IRON_RGB = [], GOLD_RGB = [];
+for (let sh = 0; sh < 16; sh++) {
+  const d = (sh - 8) * 2;
+  IRON_RGB.push([150 + d, 156 + d, 164 + d]);
+  GOLD_RGB.push([255, 205 + d * 2, 40 + d]);
+}
+const IRON_PACK = IRON_RGB.map(c => pack(c[0], c[1], c[2]));
+const GOLD_PACK = GOLD_RGB.map(c => pack(c[0], c[1], c[2]));
+const GLOW_T = [300, 600, 900, 1300, 1700, 2000];
+const GLOW_C = [[110,30,20],[190,50,20],[240,100,20],[255,160,40],[255,210,90],[255,245,200]];
+let gR = 0, gG = 0, gB = 0;
+function glowAt(t) {
+  const n = GLOW_T.length - 1;
+  if (t <= GLOW_T[0]) { gR = GLOW_C[0][0]; gG = GLOW_C[0][1]; gB = GLOW_C[0][2]; return; }
+  if (t >= GLOW_T[n]) { gR = GLOW_C[n][0]; gG = GLOW_C[n][1]; gB = GLOW_C[n][2]; return; }
+  let k = 0;
+  while (t > GLOW_T[k + 1]) k++;
+  const f = (t - GLOW_T[k]) / (GLOW_T[k + 1] - GLOW_T[k]);
+  const a = GLOW_C[k], b = GLOW_C[k + 1];
+  gR = a[0] + (b[0] - a[0]) * f; gG = a[1] + (b[1] - a[1]) * f; gB = a[2] + (b[2] - a[2]) * f;
+}
+function metalColor(i, isGold, t) {
+  const sh = Math.imul(i, 2654435761) >>> 28;          // 0..15, постоянный для клетки
+  if (t < 250) return isGold ? GOLD_PACK[sh] : IRON_PACK[sh];
+  const base = isGold ? GOLD_RGB[sh] : IRON_RGB[sh];
+  glowAt(t);
+  const a = Math.min(1, (t - 250) / 350);
+  return pack((base[0] + (gR - base[0]) * a) | 0, (base[1] + (gG - base[1]) * a) | 0, (base[2] + (gB - base[2]) * a) | 0);
+}
+function moltenColor(c, t) {
+  const p = Math.max(0, Math.min(1, (t - 1800) / 500));
+  return c === MOLTEN_IRON
+    ? pack(255, (140 + 95 * p) | 0, (40 + 150 * p) | 0)
+    : pack(255, (200 + 40 * p) | 0, (30 + 90 * p) | 0);
+}
+
+// ===== ВЕТЕР (НАПРАВЛЕНИЕ) =====
+function windDir(f) {
+  if (f === undefined) f = 1;
+  if (windX === 0) return Math.random() < 0.5 ? -1 : 1;
+  const bias = Math.max(0.05, Math.min(0.95, 0.5 + windX * 0.08 * f));
+  return Math.random() < bias ? 1 : -1;
+}
+
+// ===== ВЗРЫВ =====
+function explode(ex, ey, r) {
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > r) continue;
+      const nx = ex + dx, ny = ey + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny);
+      const g0 = grid[ni];
+      if ((g0 === IRON || g0 === GOLD) && d >= r * 0.3) { temp[ni] += 150; continue; }
+      if (g0 === GUNPOWDER && life[ni] === 0 && d < r * 0.8) {
+        life[ni] = 8 + rnd(8);
+        continue;
+      }
+      if (d < r * 0.3) {
+        clearCell(ni, 800);
+      } else if (d < r * 0.7) {
+        if (Math.random() < 0.5) setCell(ni, FIRE);
+        else clearCell(ni, 500);
+      } else {
+        const g = grid[ni];
+        if (g === EMPTY || g === PLANT || g === OIL) setCell(ni, FIRE, 10 + rnd(10));
+      }
+    }
+  }
+}
+
+// ===== ЭЛЕМЕНТ ВЕТЕР — ТОЛКАЕТ ВСЁ КРОМЕ КАМНЯ =====
+function applyWindSources() {
+  const r = 5;
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      if (grid[idx(x, y)] !== WIND) continue;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d > r) continue;
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const ni = idx(nx, ny);
+          const c = grid[ni];
+          // Камень, лёд, спавнер и ветер не сдвигаются
+          if (c === EMPTY || c === STONE || c === ICE || c === SPAWNER || c === WIND || c === IRON || c === GOLD) continue;
+          if (Math.random() > (1 - d / r) * 0.25) continue;
+          const px = windX > 0 ? 1 : windX < 0 ? -1 : 0;
+          const tx = nx + px, ty = ny - 1;
+          if (tx < 0 || tx >= cols || ty < 0 || ty >= rows) continue;
+          const ti = idx(tx, ty);
+          if (grid[ti] === EMPTY) {
+            grid[ti] = c; grid[ni] = EMPTY;
+            life[ti] = life[ni]; life[ni] = 0;
+            temp[ti] = temp[ni]; temp[ni] = 20;
+          }
+        }
+      }
+    }
+  }
+}
+
+// ===== ФИЗИКА =====
+// Читаем из grid, пишем в next. Затем next копируется обратно в grid.
+function step() {
+  next.set(grid);
+  // Направление обхода чередуется по номеру ШАГА (а не кадра), иначе оба шага за кадр шли в одну сторону
+  const leftToRight = (stepCount & 1) === 0;
+  for (let y = rows - 1; y >= 0; y--) {
+    if (leftToRight) for (let x = 0; x < cols; x++) updateCell(x, y);
+    else for (let x = cols - 1; x >= 0; x--) updateCell(x, y);
+  }
+  grid.set(next);
+  stepCount++;
+}
+
+function updateCell(x, y) {
+  const i = idx(x, y), c = grid[i];
+  if (IS_STATIC[c]) return;
+  switch (c) {
+    case SAND:      updSand(x, y, i); break;
+    case WATER:     updFluid(x, y, i, WATER, 1, 0.4, 1); break;
+    case FIRE:      updFire(x, y, i); break;
+    case LAVA:      updLava(x, y, i); break;
+    case STEAM:     updRise(x, y, i, STEAM, 0.8); break;
+    case OIL:       updFluid(x, y, i, OIL, 0.6, 0.2, 0.8); break;
+    case ACID:      updFluid(x, y, i, ACID, 0.8, 0.3, 1); break;
+    case GUNPOWDER: updGun(x, y, i); break;
+    case SMOKE:     updRise(x, y, i, SMOKE, 0.5); break;
+    case MOLTEN_IRON: updMolten(x, y, i, MOLTEN_IRON); break;
+    case MOLTEN_GOLD: updMolten(x, y, i, MOLTEN_GOLD); break;
+  }
+}
+
+// Клетка свободна и в текущем кадре, и в буфере.
+// Раньше проверялся только grid, поэтому две частицы могли прыгнуть в одну клетку, и одна исчезала.
+function free(j) { return grid[j] === EMPTY && next[j] === EMPTY; }
+
+// Перенос частицы вместе с её life и temp (раньше при боковом движении пара температура терялась)
+function mv(i, j, t) {
+  next[i] = EMPTY; next[j] = t;
+  life[j] = life[i]; life[i] = 0;
+  temp[j] = temp[i]; temp[i] = 20;
+}
+
+function tryDiag(x, y, i, dd, t) {          // вниз по диагонали
+  const nx = x + dd;
+  if (nx < 0 || nx >= cols || y + 1 >= rows) return false;
+  const dg = idx(nx, y + 1);
+  if (grid[idx(nx, y)] === EMPTY && free(dg)) { mv(i, dg, t); return true; }
+  return false;
+}
+function tryUp(x, y, i, dd, t) {            // вверх по диагонали
+  const nx = x + dd;
+  if (nx < 0 || nx >= cols || y === 0) return false;
+  const dg = idx(nx, y - 1);
+  if (free(dg)) { mv(i, dg, t); return true; }
+  return false;
+}
+function trySide(x, y, i, dd, t) {          // вбок
+  const nx = x + dd;
+  if (nx < 0 || nx >= cols) return false;
+  const s = idx(nx, y);
+  if (free(s)) { mv(i, s, t); return true; }
+  return false;
+}
+
+function updSand(x, y, i) {
+  if (next[i] !== SAND || y + 1 >= rows) return;
+  const b = idx(x, y + 1);
+  if (free(b)) { mv(i, b, SAND); return; }
+  // песок тонет в воде
+  if (grid[b] === WATER && next[b] === WATER && Math.random() < 0.5) {
+    next[b] = SAND; next[i] = WATER; return;
+  }
+  const d = windDir(0.5);
+  if (tryDiag(x, y, i, d, SAND)) return;
+  tryDiag(x, y, i, -d, SAND);
+}
+
+// Кислота растворяет всё, кроме газов, огня, лавы и расплавленного металла. Чем твёрже материал, тем медленнее.
+const ACID_RATE = new Float32Array(32);
+ACID_RATE[SAND] = 0.10; ACID_RATE[WATER] = 0.04; ACID_RATE[PLANT] = 0.20; ACID_RATE[STONE] = 0.06;
+ACID_RATE[ICE] = 0.15; ACID_RATE[OIL] = 0.10; ACID_RATE[GUNPOWDER] = 0.10; ACID_RATE[IRON] = 0.04;
+ACID_RATE[GOLD] = 0.03; ACID_RATE[SPAWNER] = 0.02; ACID_RATE[WIND] = 0.10;
+
+function acidEat(x, y, i) {
+  for (let k = 0; k < 4; k++) {
+    const nx = x + DX4[k], ny = y + DY4[k];
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+    const ni = idx(nx, ny), nc = grid[ni], rt = ACID_RATE[nc];
+    if (rt > 0 && next[ni] === nc && Math.random() < rt) {
+      next[ni] = EMPTY; life[ni] = 0; temp[ni] = 20; spawnerType[ni] = 0;
+      if (Math.random() < 0.35) { next[i] = EMPTY; return true; }   // кислота расходуется
+    }
+  }
+  return false;
+}
+
+function updFluid(x, y, i, t, fs, sc, wf) {
+  if (next[i] !== t) return;                 // клетку уже изменили в этом шаге
+  // Кислота разъедает соседей на ходу, а не только когда стоит на месте
+  if (t === ACID && acidEat(x, y, i)) return;
+  if (Math.random() > fs) return;
+  const d = windDir(wf);
+  // Раньше жидкость на самой нижней строке вообще не могла растекаться вбок
+  if (y + 1 < rows) {
+    const b = idx(x, y + 1);
+    if (free(b)) { mv(i, b, t); return; }
+    if (tryDiag(x, y, i, d, t) || tryDiag(x, y, i, -d, t)) return;
+  }
+  if (Math.random() < sc) {
+    if (trySide(x, y, i, d, t) || trySide(x, y, i, -d, t)) return;
+  }
+  // масло всплывает над водой
+  if (t === OIL && y > 0) {
+    const a = idx(x, y - 1);
+    if (grid[a] === WATER && next[a] === WATER) { next[a] = OIL; next[i] = WATER; return; }
+  }
+}
+
+function updRise(x, y, i, t, rs) {
+  if (next[i] !== t) return;
+  if (t === STEAM && temp[i] < 80) { next[i] = WATER; life[i] = 0; temp[i] = 20; return; }
+  life[i]--;
+  if (life[i] <= 0) {
+    next[i] = (t === STEAM) ? WATER : EMPTY;
+    life[i] = 0; temp[i] = 20; return;
+  }
+  if (Math.random() > rs) return;
+  if (y > 0) {
+    const a = idx(x, y - 1);
+    if (free(a)) { mv(i, a, t); return; }
+    const d = windDir(2);
+    if (tryUp(x, y, i, d, t) || tryUp(x, y, i, -d, t)) return;
+  }
+  if (Math.random() < 0.3) trySide(x, y, i, windDir(2), t);
+}
+
+function updFire(x, y, i) {
+  life[i]--;
+  if (life[i] <= 0) {
+    if (Math.random() < 0.15) { next[i] = SMOKE; life[i] = 60 + rnd(40); temp[i] = 100; }
+    else { next[i] = EMPTY; life[i] = 0; temp[i] = 20; }
+    return;
+  }
+  for (let k = 0; k < 8; k++) {
+    const nx = x + DX8[k], ny = y + DY8[k];
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+    const ni = idx(nx, ny), gc = grid[ni];
+    if (gc === PLANT) {
+      if (next[ni] === PLANT && Math.random() < 0.35) { next[ni] = FIRE; life[ni] = 15 + rnd(10); temp[ni] = 800; }
+    } else if (gc === OIL) {
+      if (next[ni] === OIL && Math.random() < 0.5) { next[ni] = FIRE; life[ni] = 35 + rnd(20); temp[ni] = 800; }
+    } else if (gc === ICE) {
+      if (next[ni] === ICE && Math.random() < 0.25) { next[ni] = WATER; temp[ni] = 20; }
+    } else if (gc === WATER) {
+      life[i] -= 3;
+      if (next[ni] === WATER && Math.random() < 0.3) { next[ni] = EMPTY; temp[ni] = 20; }
+    } else if (gc === GUNPOWDER && life[ni] === 0) {
+      life[ni] = 15 + rnd(10);
+    }
+  }
+  if (y > 0) {
+    const a = idx(x, y - 1);
+    if (free(a)) { mv(i, a, FIRE); return; }
+    const d = windDir(1.5);
+    if (tryUp(x, y, i, d, FIRE)) return;
+    tryUp(x, y, i, -d, FIRE);
+  }
+}
+
+function updLava(x, y, i) {
+  if (next[i] !== LAVA) return;
+  if (Math.random() > 0.7) return;
+  const d = windDir(0.3);
+  if (y + 1 < rows) {
+    const b = idx(x, y + 1);
+    if (free(b)) { mv(i, b, LAVA); return; }
+    if (tryDiag(x, y, i, d, LAVA) || tryDiag(x, y, i, -d, LAVA)) return;
+  }
+  if (Math.random() < 0.2) {
+    if (trySide(x, y, i, d, LAVA)) return;
+    trySide(x, y, i, -d, LAVA);
+  }
+}
+
+// Расплавленный металл: вязче лавы, течёт медленнее
+function updMolten(x, y, i, t) {
+  if (next[i] !== t) return;
+  if (Math.random() > 0.5) return;
+  const d = windDir(0.3);
+  if (y + 1 < rows) {
+    const b = idx(x, y + 1);
+    if (free(b)) { mv(i, b, t); return; }
+    if (tryDiag(x, y, i, d, t) || tryDiag(x, y, i, -d, t)) return;
+  }
+  if (Math.random() < 0.25) {
+    if (trySide(x, y, i, d, t)) return;
+    trySide(x, y, i, -d, t);
+  }
+}
+
+function updGun(x, y, i) {
+  if (next[i] !== GUNPOWDER) return;
+  if (life[i] > 0) {                        // горит, скоро взорвётся
+    life[i]--;
+    if (life[i] <= 0) {
+      explosionQueue.push({x: x, y: y, r: 6});
+      next[i] = EMPTY; life[i] = 0;
+    }
+    return;
+  }
+  for (let k = 0; k < 8; k++) {
+    const nx = x + DX8[k], ny = y + DY8[k];
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+    const g = grid[idx(nx, ny)];
+    if (g === FIRE || g === LAVA) { life[i] = 15 + rnd(10); return; }
+  }
+  if (y + 1 >= rows) return;
+  const b = idx(x, y + 1);
+  if (free(b)) { mv(i, b, GUNPOWDER); return; }
+  // порох тяжелее воды и тонет в ней
+  if (grid[b] === WATER && next[b] === WATER && Math.random() < 0.5) {
+    next[b] = GUNPOWDER; next[i] = WATER; return;
+  }
+  const d = windDir(0.5);
+  if (tryDiag(x, y, i, d, GUNPOWDER)) return;
+  tryDiag(x, y, i, -d, GUNPOWDER);
+}
+
+// ===== ТЕМПЕРАТУРА =====
+// Материалы: как быстро греются от огня и лавы, как проводят тепло и когда плавятся.
+const FIRE_HEAT = new Float32Array(32);                // +градусов за тик от КАЖДОЙ соседней клетки огня
+const LAVA_HEAT = new Float32Array(32);                // то же для лавы (в радиусе 3)
+const CONDUCT   = new Float32Array(32);                // теплопроводность: доля разницы температур за тик
+const MELT_T    = new Float32Array(32).fill(1e9);      // температура плавления
+const MELT_TO   = new Uint8Array(32);                  // во что плавится
+const FREEZE_TO = new Uint8Array(32);                  // расплав -> твёрдый металл
+const MELT_POINT = 2000;                               // железо и золото плавятся при 2000 градусах
+const FREEZE_POINT = 1800;                             // расплав застывает ниже 1800 (чтобы не мигал на границе)
+const AIR_LOSS = 0.005;                                // теплоотдача воздуху (через каждую открытую сторону)
+const WATER_LOSS = 0.03;                               // теплоотдача воде (намного быстрее)
+
+FIRE_HEAT[STONE] = 2; LAVA_HEAT[STONE] = 100; CONDUCT[STONE] = 0.03; MELT_T[STONE] = 1000; MELT_TO[STONE] = LAVA;
+FIRE_HEAT[IRON]  = 8;   LAVA_HEAT[IRON]  = 40;  CONDUCT[IRON]  = 0.10; MELT_T[IRON]  = MELT_POINT; MELT_TO[IRON] = MOLTEN_IRON;
+FIRE_HEAT[GOLD]  = 8;   LAVA_HEAT[GOLD]  = 40;  CONDUCT[GOLD]  = 0.14; MELT_T[GOLD]  = MELT_POINT; MELT_TO[GOLD] = MOLTEN_GOLD;
+FIRE_HEAT[MOLTEN_IRON] = FIRE_HEAT[MOLTEN_GOLD] = 3;
+FREEZE_TO[MOLTEN_IRON] = IRON; FREEZE_TO[MOLTEN_GOLD] = GOLD;
+
+// Фазовые переходы копятся в очереди и применяются в конце, чтобы не мешать обходу
+const pcI = [], pcC = [], pcT = [], pcL = [];
+function queue(i, c, t, l) { pcI.push(i); pcC.push(c); pcT.push(t); pcL.push(l || 0); }
+
+// Расплавленный металл: греет соседей, поджигает горючее, кипятит воду и застывает, остывая
+function heatMolten(x, y, i, c) {
+  for (let k = 0; k < 8; k++) {
+    const nx = x + DX8[k], ny = y + DY8[k];
+    if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+    const ni = idx(nx, ny), nc = grid[ni];
+    if (nc === IRON || nc === GOLD) {
+      const q = CONDUCT[nc] * 1.5 * (temp[i] - temp[ni]);
+      if (q > 0) { temp[ni] += q; temp[i] -= q * 0.3; }
+    } else if (nc === STONE) {
+      if (temp[ni] < 900) temp[ni] += 0.01 * (temp[i] - temp[ni]);   // камень краснеет, но от металла не плавится
+    } else if (nc === WATER) {
+      temp[i] -= 250;
+      if (Math.random() < 0.35) queue(ni, STEAM, 150, 100 + rnd(50));
+      else queue(ni, EMPTY, 20);
+    } else if (nc === ICE) {
+      queue(ni, WATER, 20);
+    } else if (nc === PLANT) {
+      queue(ni, FIRE, 800, 15 + rnd(10));
+    } else if (nc === OIL) {
+      queue(ni, FIRE, 800, 35 + rnd(20));
+    } else if (nc === GUNPOWDER && life[ni] === 0) {
+      life[ni] = 10 + rnd(8);
+    }
+  }
+  temp[i] -= 1.5;
+  if (temp[i] < FREEZE_POINT) queue(i, FREEZE_TO[c], temp[i]);
+}
+
+function updateTemperatures() {
+  pcI.length = 0; pcC.length = 0; pcT.length = 0; pcL.length = 0;
+
+  // 1. Источники тепла
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = idx(x, y), c = grid[i];
+      if (c === FIRE) {
+        for (let k = 0; k < 8; k++) {
+          const nx = x + DX8[k], ny = y + DY8[k];
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const ni = idx(nx, ny), nc = grid[ni];
+          if (FIRE_HEAT[nc] > 0) {
+            temp[ni] += FIRE_HEAT[nc];             // огонь постепенно нагревает любой твёрдый предмет
+          } else if (nc === EMPTY) {
+            temp[ni] += 1.5;
+            if (temp[ni] > 800) temp[ni] = 800;
+          } else if (nc === WATER && Math.random() < 0.1) {
+            queue(ni, STEAM, 150, 100 + rnd(50));
+          }
+        }
+      } else if (c === LAVA) {
+        const r = 3; let touchedWater = false;
+        // Есть ли вода прямо под лавой (снизу или по диагонали)?
+        let wi = -1;
+        if (y + 1 < rows) {
+          const b = idx(x, y + 1);
+          if (grid[b] === WATER) wi = b;
+          else if (x > 0 && grid[b - 1] === WATER) wi = b - 1;
+          else if (x < cols - 1 && grid[b + 1] === WATER) wi = b + 1;
+        }
+        const onWater = wi >= 0;
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            if (dx * dx + dy * dy > r * r + 1) continue;
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+            const ni = idx(nx, ny), nc = grid[ni];
+            if (LAVA_HEAT[nc] > 0) {
+              // свежая корочка (life > 0) не плавится от лавы над ней
+              if (!(nc === STONE && life[ni] > 0)) temp[ni] += LAVA_HEAT[nc];
+            } else if (nc === ICE) {
+              queue(ni, WATER, 20);
+            } else if (nc === PLANT) {
+              queue(ni, FIRE, 800, 15 + rnd(10));
+            } else if (nc === WATER) {
+              // воду кипятит только лава вплотную; воду под коркой не трогаем
+              if (onWater || dx < -1 || dx > 1 || dy < -1 || dy > 1) continue;
+              touchedWater = true; temp[i] -= 200;
+              // лава + вода: часть воды превращается в пар, а не просто исчезает
+              if (Math.random() < 0.35) queue(ni, STEAM, 150, 100 + rnd(50));
+              else queue(ni, EMPTY, 20);
+            } else if (nc === OIL) {
+              queue(ni, FIRE, 800, 35 + rnd(20));
+            } else if (nc === GUNPOWDER && life[ni] === 0) {
+              life[ni] = 10 + rnd(8);
+            } else if (nc === EMPTY) {
+              temp[ni] += 3;
+              if (temp[ni] > 2000) temp[ni] = 2000;
+            }
+          }
+        }
+        if (onWater) {
+          // Лава на поверхности воды застывает каменной коркой, которая защищает воду под собой
+          if (Math.random() < 0.7) {
+            queue(i, STONE, 700, 400);
+            if (Math.random() < 0.12) queue(wi, STEAM, 150, 100 + rnd(50));   // чуть-чуть пара
+          }
+          continue;
+        }
+        if (touchedWater && Math.random() < 0.5) queue(i, STONE, 600);
+        temp[i] -= 10;
+        if (temp[i] < 900 && !touchedWater) queue(i, STONE, temp[i]);
+      } else if (c === MOLTEN_IRON || c === MOLTEN_GOLD) {
+        heatMolten(x, y, i, c);
+      }
+    }
+  }
+
+  // 2. Распространение тепла: воздух усредняется с соседями, а твёрдые тела проводят тепло друг через друга,
+  //    отдают его воздуху и воде и при достижении температуры плавления превращаются в расплав.
+  tempBuf.set(temp);
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const i = idx(x, y), g = grid[i];
+      if (g === EMPTY) {
+        let s = temp[i], cnt = 1;
+        if (x > 0)        { s += temp[i - 1]; cnt++; }
+        if (x < cols - 1) { s += temp[i + 1]; cnt++; }
+        if (y > 0)        { s += temp[i - cols] * 1.3; cnt += 1.3; }
+        if (y < rows - 1) { s += temp[i + cols] * 0.7; cnt += 0.7; }
+        tempBuf[i] = s / cnt;
+      } else if (CONDUCT[g] > 0) {
+        const kS = CONDUCT[g];
+        let T = temp[i], dT = 0;
+        for (let k = 0; k < 4; k++) {
+          const nx = x + DX4[k], ny = y + DY4[k];
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const ni = idx(nx, ny), nc = grid[ni], kn = CONDUCT[nc];
+          if (kn > 0) {
+            dT += (kS < kn ? kS : kn) * (temp[ni] - T);
+          } else if (T > 20) {
+            if (nc === EMPTY) {
+              dT -= AIR_LOSS * (T - 20);
+            } else if (nc === WATER) {
+              dT -= WATER_LOSS * (T - 20);
+              if (T > 300 && Math.random() < 0.02) queue(ni, STEAM, 150, 100 + rnd(50));
+            }
+          }
+        }
+        T += dT;
+        if (T < 20) { T += 0.05; if (T > 20) T = 20; }     // охлаждённое тело медленно теплеет
+        tempBuf[i] = T;
+        if (g === STONE && life[i] > 0) life[i]--;
+        if (T >= MELT_T[g]) queue(i, MELT_TO[g], T);
+      }
+    }
+  }
+  temp.set(tempBuf);
+
+  for (let i = 0; i < temp.length; i++) {
+    if (grid[i] === EMPTY) {
+      if (temp[i] > 20) { temp[i] -= 0.5; if (temp[i] < 20) temp[i] = 20; }
+      else if (temp[i] < 20) { temp[i] += 0.05; if (temp[i] > 20) temp[i] = 20; }
+    }
+  }
+
+  for (let k = 0; k < pcI.length; k++) setCell(pcI[k], pcC[k], pcL[k], pcT[k]);
+}
+
+// ===== СПАВНЕР =====
+const SPAWN_DX = [0, -1, 1, -1, 1], SPAWN_DY = [-1, -1, -1, 0, 0];
+function updateSpawner(x, y, i) {
+  const st = spawnerType[i];
+  if (st === 0) return;
+  if (Math.random() < 0.3) {
+    for (let k = 0; k < 5; k++) {
+      const nx = x + SPAWN_DX[k], ny = y + SPAWN_DY[k];
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny);
+      if (grid[ni] !== EMPTY) continue;
+      setCell(ni, st);
+      return;
+    }
+  }
+}
+
+// ===== ИИ-КУРСОР 2.0 =====
+// У курсора есть цели, память о построенном и "мысли" (они видны под курсором).
+// Он строит дома, башни и сады, чинит повреждённое, тушит пожар рядом со своими зданиями,
+// а ВАШИ постройки сносит и забирает золото и железо. Свои клетки он отличает от ваших по маске aiMade.
+
+const AI_NAMES = {
+  think: 'размышляет', flee: 'убегает', house: 'строит дом', tower: 'строит башню', garden: 'разбивает сад',
+  repair: 'чинит', demolish: 'ломает ваше', mine: 'добывает', burn: 'поджигает рощу', extinguish: 'тушит пожар'
+};
+const AI_COLORS = {
+  think: '#bbbbbb', flee: '#ffff00', house: '#33ff66', tower: '#66ddaa', garden: '#66ff66',
+  repair: '#66ddff', demolish: '#ff3344', mine: '#ffcc33', burn: '#ff6600', extinguish: '#3399ff'
+};
+
+const GAS = new Uint8Array(32);                 // сквозь это можно "смотреть" при поиске земли
+[EMPTY, FIRE, STEAM, SMOKE, WIND].forEach(c => { GAS[c] = 1; });
+const SUPPORT = new Uint8Array(32);             // на этом можно строить
+[SAND, STONE, ICE, IRON, GOLD, PLANT].forEach(c => { SUPPORT[c] = 1; });
+const HAZARD = new Uint8Array(32);              // то, что угрожает зданиям
+[FIRE, LAVA, MOLTEN_IRON, MOLTEN_GOLD].forEach(c => { HAZARD[c] = 1; });
+const BREAKABLE = new Uint8Array(32);           // что ИИ может сломать, если это не его
+[STONE, IRON, GOLD, ICE, SPAWNER, PLANT].forEach(c => { BREAKABLE[c] = 1; });
+const VAL_GOLD = new Uint8Array(32); VAL_GOLD[GOLD] = 1;
+const VAL_IRON = new Uint8Array(32); VAL_IRON[IRON] = 1;
+// Веса для поиска скоплений
+const W_SOLID = new Float32Array(32);
+W_SOLID[STONE] = 1; W_SOLID[IRON] = 1; W_SOLID[ICE] = 1; W_SOLID[SPAWNER] = 1; W_SOLID[GOLD] = 3;
+const W_PLANT = new Float32Array(32); W_PLANT[PLANT] = 1;
+const W_GOLD = new Float32Array(32); W_GOLD[GOLD] = 1;
+const W_IRON = new Float32Array(32); W_IRON[IRON] = 1;
+
+function toggleAI() {
+  if (aiCursor) { aiCursor = null; }
+  else {
+    aiCursor = {
+      x: canvas.width / 2, y: canvas.height / 3, vx: 0, vy: 0,
+      goal: 'think', timer: 0, limit: 40, thought: 'Привет! Посмотрим, что тут у нас.',
+      tgt: null, plan: [], planPos: 0, cur: null, structs: [], loot: {gold: 0, iron: 0},
+      danger: 0, threat: null, trail: [], broken: 0, last: '', forgot: null, mineType: GOLD
+    };
+  }
+  const b = $('btn-ai');
+  b.textContent = 'ИИ: ' + (aiCursor ? 'ВКЛ' : 'ВЫКЛ');
+  b.classList.toggle('active', !!aiCursor);
+}
+
+// Сдвиг памяти ИИ при изменении высоты окна (мир выравнивается по низу)
+function aiShift(dy) {
+  if (!aiCursor || dy === 0) return;
+  const ai = aiCursor;
+  ai.y += dy * CELL; ai.tgt = null;
+  for (const st of ai.structs) {
+    st.cells = st.cells.filter(c => { c[1] += dy; return c[1] >= 0 && c[1] < rows && c[0] < cols; });
+    st.y0 += dy; st.y1 += dy;
+  }
+  ai.plan = []; ai.planPos = 0; ai.cur = null;
+  if (ai.goal === 'house' || ai.goal === 'tower' || ai.goal === 'garden' || ai.goal === 'repair') {
+    aiSetGoal('think', 'Окно изменилось, пересмотрю планы.', 40);
+  }
+}
+
+function aiSetGoal(goal, thought, limit) {
+  const ai = aiCursor;
+  ai.goal = goal; ai.timer = 0; ai.limit = limit || 600;
+  ai.thought = thought || ''; ai.tgt = null;
+}
+function aiDone(thought) { aiSetGoal('think', thought, 25 + rnd(40)); }
+
+// Плавное движение к точке. Возвращает оставшееся расстояние.
+function aiGo(tx, ty, k, maxV) {
+  const ai = aiCursor;
+  let vx = (tx - ai.x) * k, vy = (ty - ai.y) * k;
+  const m = Math.sqrt(vx * vx + vy * vy);
+  if (m > maxV) { vx *= maxV / m; vy *= maxV / m; }
+  ai.vx = vx; ai.vy = vy; ai.x += vx; ai.y += vy;
+  const dx = tx - ai.x, dy = ty - ai.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function randCol() {
+  const m = Math.min(50, Math.floor(cols / 4));
+  return m + rnd(Math.max(1, cols - 2 * m));
+}
+
+// ---------- восприятие мира ----------
+function aiDanger() {
+  const ai = aiCursor;
+  const cx0 = Math.floor(ai.x / CELL), cy0 = Math.floor(ai.y / CELL);
+  let d = 0;
+  for (let dy = -8; dy <= 8; dy++) {
+    for (let dx = -8; dx <= 8; dx++) {
+      const nx = cx0 + dx, ny = cy0 + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ni = idx(nx, ny), c = grid[ni];
+      if (HAZARD[c] === 1) d++;
+      else if (c === GUNPOWDER && life[ni] > 0) d += 5;
+    }
+  }
+  return d;
+}
+
+function aiScan() {
+  const sc = { plants: 0, userSolid: 0, gold: 0, iron: 0 };
+  for (let i = 0; i < grid.length; i++) {
+    if (aiMade[i]) continue;
+    const g = grid[i];
+    if (g === PLANT) sc.plants++;
+    else if (g === GOLD) { sc.gold++; sc.userSolid++; }
+    else if (g === IRON) { sc.iron++; sc.userSolid++; }
+    else if (g === STONE || g === ICE || g === SPAWNER) sc.userSolid++;
+  }
+  return sc;
+}
+
+function aiCollect(pred) {
+  const out = [];
+  for (let i = 0; i < grid.length; i++) if (pred(i)) out.push(i);
+  return out;
+}
+
+// Сколько "ценных" чужих клеток в круге (с весами по типам)
+function aiCluster(cx, cy, r, W) {
+  let n = 0;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r + 1) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ci = idx(nx, ny);
+      if (aiMade[ci] === 0) n += W[grid[ci]];
+    }
+  }
+  return n;
+}
+
+// Из списка клеток выбирает ту, вокруг которой больше всего интересного
+function aiBestOf(list, r, tries, W) {
+  let best = -1, bs = 0;
+  for (let a = 0; a < tries; a++) {
+    const ci = list[rnd(list.length)];
+    const s = aiCluster(ci % cols, (ci / cols) | 0, r, W);
+    if (s > bs) { bs = s; best = ci; }
+  }
+  return best;
+}
+
+function aiNearOwn(x, y, m) {
+  for (const st of aiCursor.structs) {
+    if (x >= st.x0 - m && x <= st.x1 + m && y >= st.y0 - m && y <= st.y1 + m) return true;
+  }
+  return false;
+}
+
+// Опасность для собственных построек: огонь, лава или расплав поблизости
+function aiThreat() {
+  const ai = aiCursor;
+  let best = null;
+  for (const st of ai.structs) {
+    const xa = Math.max(0, st.x0 - 7), xb = Math.min(cols - 1, st.x1 + 7);
+    const ya = Math.max(0, st.y0 - 7), yb = Math.min(rows - 1, st.y1 + 7);
+    let n = 0, sx = 0, sy = 0, src = -1;
+    for (let y = ya; y <= yb; y++) {
+      for (let x = xa; x <= xb; x++) {
+        const ci = idx(x, y), g = grid[ci];
+        if (HAZARD[g] === 1) { n++; sx += x; sy += y; }
+        else if (g === SPAWNER && aiMade[ci] === 0 && (spawnerType[ci] === FIRE || spawnerType[ci] === LAVA)) {
+          n += 6; sx += x * 6; sy += y * 6; src = ci;      // источник огня: опаснее любого одиночного пламени
+        }
+      }
+    }
+    if (n >= 4 && (!best || n > best.n)) best = { st: st, n: n, cx: Math.round(sx / n), cy: Math.round(sy / n), src: src };
+  }
+  return best;
+}
+
+// Чего не хватает в здании (клетки, которые должны быть, а там пусто)
+function aiMissing(st) {
+  const m = [];
+  for (const c of st.cells) {
+    if (c[0] < 0 || c[0] >= cols || c[1] < 0 || c[1] >= rows) continue;
+    const g = grid[idx(c[0], c[1])];
+    if (g === EMPTY || g === SMOKE || g === STEAM || g === WATER) m.push(c);
+  }
+  return m;
+}
+
+function aiDamaged() {
+  const ai = aiCursor;
+  for (let k = ai.structs.length - 1; k >= 0; k--) {
+    const st = ai.structs[k];
+    const m = aiMissing(st);
+    // здание разрушено дотла: чинить бессмысленно, забываем его
+    if (st.done && m.length > st.cells.length * 0.6) { ai.structs.splice(k, 1); ai.forgot = st.name; continue; }
+    if (m.length >= (st.done ? 3 : 1)) return { st: st, missing: m };
+  }
+  return null;
+}
+
+// ---------- выбор цели ----------
+function aiChoose() {
+  const ai = aiCursor;
+  const note = ai.forgot ? ('Мой ' + ai.forgot + ' разрушен. Забудем. ') : '';
+  ai.forgot = null;
+
+  const th = aiThreat();
+  if (th) {
+    ai.threat = th;
+    aiSetGoal('extinguish', 'Огонь рядом с моим зданием (' + th.st.name + ')! Тушу.', 420);
+    return;
+  }
+  const dmg = aiDamaged();
+  if (dmg && Math.random() < 0.8) { aiStartRepair(dmg); return; }
+
+  const sc = aiScan();
+  const opts = [];
+  const add = (goal, w, why) => { opts.push({ goal: goal, w: goal === ai.last ? w * 0.25 : w, why: note + why }); };
+  if (sc.userSolid >= 4) add('demolish', 3 + Math.min(3, sc.userSolid / 80), 'Это построено не мной. Снесу.');
+  if (sc.gold > 0) add('mine', 3, 'Вижу золото. Заберу себе.');
+  else if (sc.iron > 0) add('mine', 1.5, 'Железо пригодится. Заберу.');
+  if (sc.plants >= 8) add('burn', 1.2, 'Эта роща мне не нравится...');
+  const few = ai.structs.length < 6;
+  add('house', few ? 2.5 : 0.8, 'Нужен дом. Ищу ровное место.');
+  add('tower', few ? 2 : 0.6, 'Построю башню: сверху будет видно всё.');
+  add('garden', few ? 2 : 0.6, 'Разобью сад с прудом.');
+
+  let tot = 0;
+  for (const o of opts) tot += o.w;
+  let r = Math.random() * tot, pick = opts[0];
+  for (const o of opts) { r -= o.w; if (r <= 0) { pick = o; break; } }
+  ai.last = pick.goal;
+
+  let ok = false;
+  if (pick.goal === 'house' || pick.goal === 'tower' || pick.goal === 'garden') ok = aiStartBuild(pick.goal, pick.why);
+  else if (pick.goal === 'demolish') ok = aiStartDemolish(pick.why);
+  else if (pick.goal === 'mine') ok = aiStartMine(pick.why);
+  else if (pick.goal === 'burn') ok = aiStartBurn(pick.why);
+  if (!ok && ai.goal === 'think' && ai.timer >= ai.limit) aiDone('Не получилось. Подумаю ещё.');
+}
+
+// ---------- строительство ----------
+// Высота земли в колонке: y первой твёрдой клетки, rows если там дно, -1 если строить нельзя (вода, лава...)
+function groundY(x) {
+  for (let y = 0; y < rows; y++) {
+    const g = grid[idx(x, y)];
+    if (GAS[g] === 1) continue;
+    if (g === WATER) {                              // мелководье (до 4 клеток) не помеха: воду можно вытеснить
+      let yy = y;
+      while (yy < rows && grid[idx(x, yy)] === WATER) yy++;
+      if (yy - y > 4) return -1;
+      if (yy >= rows) return rows;
+      return SUPPORT[grid[idx(x, yy)]] === 1 ? yy : -1;
+    }
+    return SUPPORT[g] === 1 ? y : -1;
+  }
+  return rows;
+}
+
+function aiFindSite(w, hNeed) {
+  const ai = aiCursor;
+  for (let tries = 0; tries < 80; tries++) {
+    const x0 = 3 + rnd(Math.max(1, cols - w - 8));
+    if (x0 + w >= cols - 2) continue;
+    const gy = [];
+    let gmin = 1e9, gmax = -1, ok = true;
+    for (let dx = 0; dx < w && ok; dx++) {
+      const g = groundY(x0 + dx);
+      if (g < 0) { ok = false; break; }
+      gy.push(g);
+      if (g < gmin) gmin = g;
+      if (g > gmax) gmax = g;
+    }
+    if (!ok || gmax - gmin > 4) continue;
+    if (gmin - hNeed < 3) continue;
+    let clash = false;
+    for (const st of ai.structs) if (x0 < st.x1 + 4 && x0 + w > st.x0 - 4) { clash = true; break; }
+    if (clash) continue;
+    return { x0: x0, w: w, base: gmin - 1, gy: gy };
+  }
+  return null;
+}
+
+function aiPut(arr, seen, x, y, t) {
+  if (x < 1 || x >= cols - 1 || y < 1 || y >= rows) return;
+  const k = y * cols + x;
+  if (seen.has(k)) return;
+  seen.add(k);
+  arr.push([x, y, t]);
+}
+
+// Дом: каменные стены с дверным проёмом и окном, железная крыша и золотой шпиль
+function planHouse(site) {
+  const S = [], seen = new Set(), x0 = site.x0, w = site.w, b = site.base;
+  const put = (x, y, t) => aiPut(S, seen, x, y, t);
+  const h = 7 + rnd(5), top = b - h;
+  for (let dx = 0; dx < w; dx++) {
+    for (let y = b + 1; y < site.gy[dx]; y++) put(x0 + dx, y, STONE);   // фундамент
+    put(x0 + dx, b, STONE);                                             // пол
+  }
+  for (let y = b - 1; y > top; y--) {
+    if (y < b - 3) put(x0, y, STONE);                                   // левая стена (внизу дверь в 3 клетки)
+    if (y < top + 2 || y > top + 3) put(x0 + w - 1, y, STONE);          // правая стена (окно в 2 клетки)
+  }
+  // потолок с карнизом и двускатная кровля (только контур, внутри чердак)
+  let xs = x0 - 1, xe = x0 + w, y = top;
+  for (let x = xs; x <= xe; x++) put(x, y, IRON);
+  xs++; xe--; y--;
+  while (xs <= xe) {
+    put(xs, y, IRON); put(xs + 1, y, IRON);
+    put(xe, y, IRON); put(xe - 1, y, IRON);
+    xs++; xe--; y--;
+  }
+  put(x0 + (w >> 1), y, GOLD);
+  return { S: S, P: [], W: [] };
+}
+
+// Башня: этажи с окнами, железная площадка с зубцами и флагшток с золотой верхушкой
+function planTower(site) {
+  const S = [], seen = new Set(), x0 = site.x0, w = site.w, b = site.base;
+  const put = (x, y, t) => aiPut(S, seen, x, y, t);
+  const h = 22 + rnd(15), top = b - h;
+  for (let dx = 0; dx < w; dx++) {
+    for (let y = b + 1; y < site.gy[dx]; y++) put(x0 + dx, y, STONE);
+    put(x0 + dx, b, STONE);
+  }
+  for (let y = b - 1; y > top; y--) {
+    const lvl = Math.floor((b - y) / 7), rel = (b - y) % 7;
+    const win = (rel === 3 || rel === 4);
+    if (!(win && lvl % 2 === 0)) put(x0, y, STONE);
+    if (!(win && lvl % 2 === 1)) put(x0 + w - 1, y, STONE);
+    if (rel === 0) for (let dx = 1; dx < w - 1; dx++) put(x0 + dx, y, STONE);   // перекрытие этажа
+  }
+  for (let dx = -2; dx < w + 2; dx++) { put(x0 + dx, top, IRON); put(x0 + dx, top - 1, IRON); }
+  for (let dx = -2; dx < w + 2; dx += 2) put(x0 + dx, top - 2, IRON);           // зубцы
+  const cx = x0 + (w >> 1);
+  for (let k = 3; k <= 7; k++) put(cx, top - k, IRON);                           // флагшток
+  put(cx, top - 8, GOLD);
+  return { S: S, P: [], W: [] };
+}
+
+// Сад: каменный бассейн с водой и растения вокруг
+function planGarden(site) {
+  const S = [], P = [], W = [], seen = new Set(), x0 = site.x0, w = site.w, b = site.base;
+  const put = (x, y, t) => aiPut(S, seen, x, y, t);
+  const d = 5;
+  for (let dx = 0; dx < w; dx++) {
+    for (let y = b + 1; y < site.gy[dx]; y++) put(x0 + dx, y, STONE);
+    put(x0 + dx, b, STONE);
+  }
+  for (let y = b - 1; y >= b - d; y--) { put(x0, y, STONE); put(x0 + w - 1, y, STONE); }
+  for (let side = -1; side <= 1; side += 2) {
+    for (let k = 0; k < 6; k++) {
+      const x = side < 0 ? x0 - 1 - k : x0 + w + k;
+      if (x < 2 || x >= cols - 2) continue;
+      const g = groundY(x);
+      if (g < 2 || Math.random() < 0.3) continue;
+      const hh = 1 + rnd(3);
+      for (let j = 1; j <= hh; j++) aiPut(P, seen, x, g - j, PLANT);
+    }
+  }
+  for (let y = b - 1; y > b - d; y--) for (let x = x0 + 1; x < x0 + w - 1; x++) W.push([x, y, WATER]);
+  return { S: S, P: P, W: W };
+}
+
+function aiStartBuild(kind, why) {
+  const ai = aiCursor;
+  let w, hNeed, planner, name;
+  if (kind === 'house') { w = 14 + rnd(9); hNeed = 12 + (w >> 1) + 3; planner = planHouse; name = 'дом'; }
+  else if (kind === 'tower') { w = 5 + 2 * rnd(2); hNeed = 48; planner = planTower; name = 'башня'; }
+  else { w = 14 + rnd(7); hNeed = 8; planner = planGarden; name = 'сад'; }
+  const site = aiFindSite(w, hNeed);
+  if (!site) {
+    if (ai.structs.length >= 3) {                 // мир застроен: освобождаем место
+      const old = ai.structs.shift();
+      for (const c of old.cells) {
+        if (c[0] < 0 || c[0] >= cols || c[1] < 0 || c[1] >= rows) continue;
+        const ci = idx(c[0], c[1]);
+        if (aiMade[ci] === 1 && BREAKABLE[grid[ci]] === 1) clearCell(ci);
+      }
+      aiDone('Тесно. Разберу старое здание (' + old.name + ') и построю новое.');
+    } else aiDone('Не нашёл ровного места (' + name + ').');
+    return false;
+  }
+  const pl = planner(site);
+  pl.S.sort((a, c) => (c[1] - a[1]) || (a[0] - c[0]));        // снизу вверх
+  const cells = pl.S.concat(pl.P).map(c => c.slice());
+  let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
+  for (const c of cells) {
+    if (c[0] < x0) x0 = c[0]; if (c[0] > x1) x1 = c[0];
+    if (c[1] < y0) y0 = c[1]; if (c[1] > y1) y1 = c[1];
+  }
+  const st = { name: name, cells: cells, done: false, x0: x0, x1: x1, y0: y0, y1: y1 };
+  ai.structs.push(st);
+  if (ai.structs.length > 6) ai.structs.shift();
+  ai.cur = st;
+  ai.plan = pl.S.concat(pl.P, pl.W);
+  ai.planPos = 0;
+  aiSetGoal(kind, why, 4000);
+  return true;
+}
+
+function aiStartRepair(dmg) {
+  const ai = aiCursor;
+  ai.cur = dmg.st;
+  ai.plan = dmg.missing.slice().sort((a, c) => (c[1] - a[1]) || (a[0] - c[0]));
+  ai.planPos = 0;
+  aiSetGoal('repair', dmg.st.done ? ('Кто-то повредил мой ' + dmg.st.name + '. Чиню.') : ('Не достроил ' + dmg.st.name + '. Продолжаю.'), 4000);
+}
+
+function aiBuildTick() {
+  const ai = aiCursor;
+  if (ai.planPos >= ai.plan.length) {
+    if (ai.cur) ai.cur.done = true;
+    aiDone('Готово: ' + (ai.cur ? ai.cur.name : 'постройка') + '.');
+    return;
+  }
+  const it = ai.plan[ai.planPos];
+  const d = aiGo(it[0] * CELL, it[1] * CELL, 0.35, 16);
+  if (d < 40) {
+    let n = 0;
+    while (n < 3 && ai.planPos < ai.plan.length) {
+      const p = ai.plan[ai.planPos];
+      const ddx = p[0] * CELL - ai.x, ddy = p[1] * CELL - ai.y;
+      if (ddx * ddx + ddy * ddy > 4900) break;                 // слишком далеко от курсора
+      const ci = idx(p[0], p[1]), g = grid[ci];
+      // строительный материал вытесняет воду; воду же кладём только в пустоту
+      if (g === EMPTY || g === SMOKE || g === STEAM || (g === WATER && p[2] !== WATER)) {
+        setCell(ci, p[2]);
+        if (p[2] !== WATER) aiMade[ci] = 1;
+        n++;
+      }
+      ai.planPos++;
+    }
+  }
+}
+
+// ---------- разрушение чужого ----------
+const isUserSolid = ci => aiMade[ci] === 0 && (grid[ci] === STONE || grid[ci] === IRON || grid[ci] === GOLD || grid[ci] === ICE || grid[ci] === SPAWNER);
+
+// Ломает чужое вокруг точки. only: null (всё ломкое) или таблица типов.
+function aiBreakAround(cx, cy, r, only) {
+  const ai = aiCursor;
+  let n = 0;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r + 1) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      const ci = idx(nx, ny), g = grid[ci];
+      if (BREAKABLE[g] !== 1 || aiMade[ci] !== 0) continue;
+      if (only && only[g] !== 1) continue;
+      if (g === GOLD) ai.loot.gold++;
+      else if (g === IRON) ai.loot.iron++;
+      if (g === STONE && Math.random() < 0.3) setCell(ci, SAND);    // часть камня рассыпается щебнем
+      else clearCell(ci);
+      n++;
+    }
+  }
+  return n;
+}
+
+function aiStartDemolish(why) {
+  const list = aiCollect(isUserSolid);
+  if (list.length < 3) return false;
+  const ci = aiBestOf(list, 5, 30, W_SOLID);
+  if (ci < 0) return false;
+  aiSetGoal('demolish', why, 1200);
+  aiCursor.broken = 0;
+  aiCursor.tgt = { x: (ci % cols) * CELL, y: ((ci / cols) | 0) * CELL };
+  return true;
+}
+
+function aiDemolishTick() {
+  const ai = aiCursor;
+  if (!ai.tgt) { aiDone('Больше нечего ломать.'); return; }
+  const d = aiGo(ai.tgt.x, ai.tgt.y, 0.1, 8);
+  ai.x += (Math.random() - 0.5) * 1.2; ai.y += (Math.random() - 0.5) * 1.2;
+  if (d < 14) {                                   // пришёл на место: ломаем вокруг себя
+    const n = aiBreakAround(Math.floor(ai.x / CELL), Math.floor(ai.y / CELL), 2, null);
+    if (n > 0) { ai.broken += n; ai.thought = 'Ломаю чужое... (' + ai.broken + ')'; }
+    else {                                        // здесь ломать нечего: ищем следующее скопление
+      const list = aiCollect(isUserSolid);
+      const ci = list.length ? aiBestOf(list, 5, 30, W_SOLID) : -1;
+      if (ci < 0) { aiDone('Всё чужое снесено (' + ai.broken + ' клеток). Пора строить.'); return; }
+      ai.tgt = { x: (ci % cols) * CELL, y: ((ci / cols) | 0) * CELL };
+    }
+  }
+  if (ai.timer >= ai.limit) aiDone('Накрошился. Хватит.');
+}
+
+// ---------- добыча золота и железа ----------
+function aiNearest(list) {
+  const ai = aiCursor;
+  const cx = ai.x / CELL, cy = ai.y / CELL;
+  let best = -1, bd = 1e18;
+  for (const ci of list) {
+    const dx = (ci % cols) - cx, dy = ((ci / cols) | 0) - cy;
+    const d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = ci; }
+  }
+  return best;
+}
+
+function aiStartMine(why) {
+  const ai = aiCursor;
+  let type = GOLD;
+  let list = aiCollect(ci => aiMade[ci] === 0 && grid[ci] === GOLD);
+  if (list.length === 0) { type = IRON; list = aiCollect(ci => aiMade[ci] === 0 && grid[ci] === IRON); }
+  if (list.length === 0) return false;
+  const ci = aiNearest(list);
+  aiSetGoal('mine', why, 600);
+  ai.mineType = type;
+  ai.tgt = { x: (ci % cols) * CELL, y: ((ci / cols) | 0) * CELL };
+  return true;
+}
+
+function aiMineTick() {
+  const ai = aiCursor;
+  if (!ai.tgt) { aiDone('Добывать больше нечего.'); return; }
+  const d = aiGo(ai.tgt.x, ai.tgt.y, 0.12, 9);
+  if (d < 10) {
+    const n = aiBreakAround(Math.floor(ai.x / CELL), Math.floor(ai.y / CELL), 1, ai.mineType === GOLD ? VAL_GOLD : VAL_IRON);
+    if (n > 0) ai.thought = 'Добыто: золото ' + ai.loot.gold + ', железо ' + ai.loot.iron + '.';
+    else {                                        // здесь пусто: идём к ближайшей жиле
+      const t = ai.mineType;
+      const list = aiCollect(ci => aiMade[ci] === 0 && grid[ci] === t);
+      if (list.length === 0) { aiDone('Забрал всё. Итого: золото ' + ai.loot.gold + ', железо ' + ai.loot.iron + '.'); return; }
+      const ci = aiNearest(list);
+      ai.tgt = { x: (ci % cols) * CELL, y: ((ci / cols) | 0) * CELL };
+    }
+  }
+  if (ai.timer >= ai.limit) aiDone('Пока хватит. В кармане золото ' + ai.loot.gold + '.');
+}
+
+// ---------- поджог чужой рощи ----------
+function aiStartBurn(why) {
+  const list = aiCollect(ci => aiMade[ci] === 0 && grid[ci] === PLANT && !aiNearOwn(ci % cols, (ci / cols) | 0, 14));
+  if (list.length < 5) return false;
+  const ci = aiBestOf(list, 4, 30, W_PLANT);
+  if (ci < 0) return false;
+  aiSetGoal('burn', why, 260);
+  aiCursor.tgt = { x: (ci % cols) * CELL, y: ((ci / cols) | 0) * CELL };
+  return true;
+}
+
+function aiBurnTick() {
+  const ai = aiCursor;
+  if (!ai.tgt) { aiDone('Поджигать нечего.'); return; }
+  const d = aiGo(ai.tgt.x, ai.tgt.y, 0.08, 8);
+  if (d < 14 && ai.timer % 3 === 0) {
+    const cx = Math.floor(ai.x / CELL), cy = Math.floor(ai.y / CELL);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const ci = idx(nx, ny), g = grid[ci];
+        if ((g === PLANT || g === OIL) && aiMade[ci] === 0) setCell(ci, FIRE);
+      }
+    }
+  }
+  if (ai.timer >= ai.limit) aiDone('Пусть горит.');
+}
+
+// ---------- тушение ----------
+function aiExtinguishTick() {
+  const ai = aiCursor;
+  if (ai.timer % 20 === 1 || !ai.threat) {
+    const th = aiThreat();
+    if (!th) { aiDone('Потушил. Теперь спокойно.'); return; }
+    ai.threat = th;
+  }
+  const th = ai.threat;
+  let tx = th.cx * CELL, ty = Math.max(70, (th.cy - 12) * CELL);
+  if (th.src >= 0) {                              // есть источник: летим к нему
+    tx = (th.src % cols) * CELL;
+    ty = Math.max(70, (((th.src / cols) | 0) - 10) * CELL);
+  }
+  const d = aiGo(tx, ty, 0.12, 9);
+  if (th.src >= 0 && grid[th.src] === SPAWNER) {
+    const sx = (th.src % cols) * CELL, sy = ((th.src / cols) | 0) * CELL;
+    if (Math.hypot(sx - ai.x, sy - ai.y) < 110) {   // достаточно близко: ломаем источник
+      clearCell(th.src);
+      ai.thought = 'Нашёл источник огня и сломал его.';
+      ai.threat = null;
+    }
+  }
+  if (d < 60) {                                   // льём воду сверху
+    const cx = Math.floor(ai.x / CELL), cy = Math.floor(ai.y / CELL);
+    for (let k = 0; k < 2; k++) {
+      const x = cx + rnd(3) - 1, y = cy + rnd(2);
+      if (x < 0 || x >= cols || y < 0 || y >= rows) continue;
+      if (grid[idx(x, y)] === EMPTY) setCell(idx(x, y), WATER);
+    }
+  }
+  if (ai.timer >= ai.limit) aiDone('Хватит, вроде погасло.');
+}
+
+// ---------- главное обновление ----------
+function updateAICursor() {
+  if (!aiCursor) return;
+  const ai = aiCursor;
+  ai.timer++;
+  ai.danger = aiDanger();
+
+  const dangerLimit = (ai.goal === 'extinguish') ? 14 : 3;    // пожарный не бежит от каждой искры
+  if (ai.danger > dangerLimit && ai.goal !== 'flee') {
+    aiSetGoal('flee', 'Горячо! Отхожу подальше.', 40);
+  } else if (ai.goal !== 'flee' && ai.goal !== 'extinguish' && simTick % 45 === 0) {
+    const th = aiThreat();
+    if (th) {
+      ai.threat = th;
+      aiSetGoal('extinguish', 'Огонь рядом с моим зданием (' + th.st.name + ')! Тушу.', 420);
+    }
+  }
+
+  switch (ai.goal) {
+    case 'think':
+      if (!ai.tgt || ai.timer % 70 === 0) ai.tgt = { x: randCol() * CELL, y: canvas.height * (0.35 + Math.random() * 0.4) };
+      aiGo(ai.tgt.x, ai.tgt.y, 0.03, 4);
+      if (ai.timer >= ai.limit) aiChoose();
+      break;
+    case 'flee': {
+      const cx0 = Math.floor(ai.x / CELL), cy0 = Math.floor(ai.y / CELL);
+      let fx = 0, fy = 0;
+      for (let dy = -8; dy <= 8; dy++) {
+        for (let dx = -8; dx <= 8; dx++) {
+          const nx = cx0 + dx, ny = cy0 + dy;
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const ni = idx(nx, ny), c = grid[ni];
+          if (HAZARD[c] === 1 || (c === GUNPOWDER && life[ni] > 0)) { fx -= dx; fy -= dy; }
+        }
+      }
+      const mg = Math.sqrt(fx * fx + fy * fy) || 1;
+      ai.vx = ai.vx * 0.9 + (fx / mg) * 0.9;
+      ai.vy = ai.vy * 0.9 + (fy / mg) * 0.9;
+      const ms = 7, sp = Math.sqrt(ai.vx * ai.vx + ai.vy * ai.vy);
+      if (sp > ms) { ai.vx *= ms / sp; ai.vy *= ms / sp; }
+      ai.x += ai.vx; ai.y += ai.vy;
+      if (ai.timer >= ai.limit) {
+        if (ai.danger > 0) ai.timer = 0;
+        else aiDone('Опасность миновала.');
+      }
+      break;
+    }
+    case 'house': case 'tower': case 'garden': case 'repair': aiBuildTick(); break;
+    case 'demolish': aiDemolishTick(); break;
+    case 'mine': aiMineTick(); break;
+    case 'burn': aiBurnTick(); break;
+    case 'extinguish': aiExtinguishTick(); break;
+  }
+
+  const mg = 30;
+  if (ai.x < mg) { ai.x = mg; ai.vx = Math.abs(ai.vx); }
+  if (ai.x > canvas.width - mg) { ai.x = canvas.width - mg; ai.vx = -Math.abs(ai.vx); }
+  if (ai.y < mg + 30) { ai.y = mg + 30; ai.vy = Math.abs(ai.vy); }
+  // до самого пола: иначе нижние клетки мира были бы недоступны для стройки и сноса
+  if (ai.y > rows * CELL - CELL) { ai.y = rows * CELL - CELL; ai.vy = -Math.abs(ai.vy); }
+  ai.trail.push({x: ai.x, y: ai.y});
+  if (ai.trail.length > 12) ai.trail.shift();
+}
+
+function drawAICursor() {
+  if (!aiCursor) return;
+  const ai = aiCursor, x = ai.x, y = ai.y;
+  const color = AI_COLORS[ai.goal] || '#ff3344';
+  const rgb = hexRGB(color);
+  ctx.save();
+  for (let i = 0; i < ai.trail.length; i++) {
+    const t = ai.trail[i];
+    const a = (i / ai.trail.length) * 0.4;
+    ctx.fillStyle = 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + a + ')';
+    ctx.fillRect(t.x - 1, t.y - 1, 3, 3);
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = 2; ctx.shadowColor = color; ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + 14, y + 5); ctx.lineTo(x + 6, y + 8);
+  ctx.lineTo(x + 10, y + 16); ctx.lineTo(x + 7, y + 17); ctx.lineTo(x + 3, y + 10);
+  ctx.lineTo(x, y + 14); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  // подпись: что делает, и добыча
+  ctx.save();
+  ctx.font = '11px Arial';
+  let lb = AI_NAMES[ai.goal] || '';
+  if (ai.loot.gold > 0 || ai.loot.iron > 0) lb += '   \u2605' + ai.loot.gold + ' \u25A0' + ai.loot.iron;
+  const w = ctx.measureText(lb).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(x + 16, y - 16, w + 8, 16);
+  ctx.fillStyle = color;
+  ctx.fillText(lb, x + 20, y - 4);
+  // "мысль" под курсором
+  if (ai.thought) {
+    ctx.font = '10px Arial';
+    const tw = ctx.measureText(ai.thought).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x + 16, y + 2, tw + 8, 14);
+    ctx.fillStyle = '#dddddd';
+    ctx.fillText(ai.thought, x + 20, y + 12);
+  }
+  ctx.restore();
+}
+
+// ===== СОХРАНЕНИЕ / ЗАГРУЗКА =====
+// Данные хранятся в компактном виде (base64 от байтов), а не в огромном JSON из чисел
+function bytesToB64(u8) {
+  let s = '';
+  const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  return btoa(s);
+}
+function b64ToBytes(b64) {
+  const s = atob(b64);
+  const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+
+function saveState() {
+  const b = $('btn-save');
+  try {
+    const t16 = Int16Array.from(temp, v => Math.max(-32768, Math.min(32767, Math.round(v))));
+    const d = {
+      v: 2, cols: cols, rows: rows,
+      grid: bytesToB64(grid),
+      life: bytesToB64(new Uint8Array(life.buffer, life.byteOffset, life.byteLength)),
+      temp: bytesToB64(new Uint8Array(t16.buffer)),
+      sp: bytesToB64(spawnerType),
+      am: bytesToB64(aiMade)
+    };
+    localStorage.setItem('elements_save', JSON.stringify(d));
+    flash(b, 'Сохранено!');
+  } catch (e) {
+    console.error(e);
+    flash(b, 'Ошибка сохранения');
+  }
+}
+
+function loadState() {
+  const b = $('btn-load');
+  try {
+    const raw = localStorage.getItem('elements_save');
+    if (!raw) { flash(b, 'Нет сохранения'); return; }
+    const d = JSON.parse(raw);
+    let g, l, t, sp;
+    if (d.v === 2) {
+      g = b64ToBytes(d.grid);
+      l = new Int16Array(b64ToBytes(d.life).buffer);
+      t = new Int16Array(b64ToBytes(d.temp).buffer);
+      sp = b64ToBytes(d.sp);
+    } else {                       // старый формат (обычные массивы)
+      g = d.grid; l = d.life; t = d.temp; sp = d.spawnerType;
+    }
+    if (g.length !== d.cols * d.rows) throw new Error('Повреждённое сохранение');
+    grid.fill(0); life.fill(0); temp.fill(20); spawnerType.fill(0); aiMade.fill(0);
+    // Если размер экрана изменился, мир подгоняется, а не отклоняется
+    copyBottomLeft(g, d.cols, d.rows, grid, cols, rows);
+    copyBottomLeft(l, d.cols, d.rows, life, cols, rows);
+    copyBottomLeft(t, d.cols, d.rows, temp, cols, rows);
+    copyBottomLeft(sp, d.cols, d.rows, spawnerType, cols, rows);
+    if (d.am) copyBottomLeft(b64ToBytes(d.am), d.cols, d.rows, aiMade, cols, rows);
+    explosionQueue = [];
+    if (aiCursor) { aiCursor.structs = []; aiCursor.plan = []; aiCursor.planPos = 0; aiCursor.cur = null; aiSetGoal('think', 'Мир изменился. Осматриваюсь.', 40); }
+    flash(b, 'Загружено!');
+  } catch (e) {
+    console.error(e);
+    flash(b, 'Ошибка загрузки');
+  }
+}
+
+// ===== МИССИИ =====
+let currentMission = 0, missionStartTick = 0, missionPlanted = false;
+let missionState = 'run', missionProgress = 0;     // run | done | fail
+
+const MISSIONS = [
+  {id: 0, name: 'Нет', desc: '', check: function() { return 0; }},
+  {id: 1, name: 'Сохрани растение',
+   desc: 'Посади растение и защити его от огня 30 секунд.',
+   check: function(t) {
+     let pc = 0;
+     for (let i = 0; i < grid.length; i++) if (grid[i] === PLANT) pc++;
+     // Таймер стартует, когда растение появилось (раньше миссия сразу "проваливалась", пока растения нет)
+     if (!missionPlanted) {
+       if (pc === 0) return 0;
+       missionPlanted = true; missionStartTick = t;
+     }
+     if (pc === 0) return -1;
+     const el = (t - missionStartTick) / 60;
+     return el >= 30 ? 1 : el / 30;
+   }},
+  {id: 2, name: 'Создай водопад',
+   desc: 'Поток воды шириной 10+ и высотой 30+ клеток.',
+   check: function() {
+     for (let x = 0; x < cols; x++) {
+       let run = 0;
+       for (let y = 0; y < rows; y++) {
+         if (grid[idx(x, y)] === WATER) run++; else run = 0;
+         if (run >= 30) {
+           let w = 0;
+           for (let dx = -5; dx <= 5; dx++) {
+             const nx = x + dx;
+             if (nx >= 0 && nx < cols && grid[idx(nx, y)] === WATER) w++;
+           }
+           if (w >= 10) return 1;
+         }
+       }
+     }
+     return 0;
+   }},
+  {id: 3, name: 'Построй башню',
+   desc: 'Каменная башня высотой 40+ клеток, шириной 3-8.',
+   check: function() {
+     // Раньше ширина проверялась в самой верхней строке экрана (y = 0), поэтому миссию было почти невозможно выполнить
+     for (let x = 0; x < cols; x++) {
+       let run = 0;
+       for (let y = 0; y < rows; y++) {
+         if (grid[idx(x, y)] === STONE) run++; else run = 0;
+         if (run >= 40) {
+           const my = y - 20;                          // середина столба
+           let l = x, r = x;
+           while (l > 0 && grid[idx(l - 1, my)] === STONE) l--;
+           while (r < cols - 1 && grid[idx(r + 1, my)] === STONE) r++;
+           const w = r - l + 1;
+           if (w >= 3 && w <= 8) return 1;
+         }
+       }
+     }
+     return 0;
+   }},
+];
+
+function restartMission() {
+  missionState = 'run'; missionProgress = 0; missionPlanted = false;
+  missionStartTick = simTick;
+  updateMissionProgress();
+}
+
+function cycleMission() {
+  currentMission = (currentMission + 1) % MISSIONS.length;
+  const m = MISSIONS[currentMission];
+  $('btn-mission').textContent = 'Миссия: ' + m.name;
+  const p = $('missionPanel');
+  if (currentMission === 0) { p.style.display = 'none'; return; }
+  p.style.display = 'block';
+  $('mpName').textContent = m.name;
+  $('mpDesc').textContent = m.desc;
+  restartMission();
+}
+
+function updateMissionProgress() {
+  if (currentMission === 0) return;
+  const m = MISSIONS[currentMission];
+  if (missionState === 'run') {
+    const pr = m.check(simTick);
+    if (pr === -1) missionState = 'fail';
+    else if (pr >= 1) missionState = 'done';
+    else missionProgress = pr;
+  }
+  const f = $('mpFill'), s = $('mpStatus');
+  if (missionState === 'fail') {
+    f.style.width = '100%'; f.style.background = 'linear-gradient(90deg,#ff3333,#ff6633)';
+    s.textContent = 'Растение погибло! Нажми на панель, чтобы начать заново.'; s.style.color = '#ff6666';
+  } else if (missionState === 'done') {
+    f.style.width = '100%'; f.style.background = 'linear-gradient(90deg,#33ff66,#3399ff)';
+    s.textContent = 'Миссия выполнена!'; s.style.color = '#33ff66';
+  } else {
+    f.style.width = Math.min(missionProgress * 100, 100) + '%';
+    f.style.background = 'linear-gradient(90deg,#33ff66,#3399ff)';
+    s.textContent = (currentMission === 1 && !missionPlanted) ? 'Посади растение, и отсчёт начнётся' : 'Выполняется...';
+    s.style.color = '#aaa';
+  }
+}
+$('missionPanel').addEventListener('click', () => { if (currentMission !== 0) restartMission(); });
+
+// ===== ОТРИСОВКА =====
+function cellColor(i) {
+  switch (grid[i]) {
+    case EMPTY: {
+      const t = temp[i];
+      if (t > 100) {
+        const a = Math.min((t - 100) / 700, 0.15);
+        return mix(255, (100 + 100 * a) | 0, 0, a);
+      }
+      return C_BG;
+    }
+    case FIRE:      return fireColor(life[i]);
+    case SAND:      return C_SAND;
+    case WATER:     return C_WATER;
+    case PLANT:     return C_PLANT;
+    case STONE:     return stoneColor(temp[i]);
+    case IRON:      return metalColor(i, false, temp[i]);
+    case GOLD:      return metalColor(i, true, temp[i]);
+    case MOLTEN_IRON:
+    case MOLTEN_GOLD: return moltenColor(grid[i], temp[i]);
+    case ICE:       return iceColor(temp[i]);
+    case LAVA:      return lavaColor(temp[i]);
+    case SPAWNER:   return SPAWNER_COL[spawnerType[i]];
+    case STEAM:     return mix(200, 220, 240, Math.min(life[i] / 100, 0.6));
+    case OIL:       return C_OIL;
+    case ACID:      return C_ACID;
+    case GUNPOWDER: return gunpowderColor(life[i]);
+    case SMOKE:     return mix(100, 100, 100, Math.min(life[i] / 60, 0.5));
+    case WIND:      return windColor();
+    default:        return C_UNKNOWN;
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!grid) return;
+  // Весь мир рисуется одним drawImage вместо десятков тысяч fillRect
+  const n = cols * rows;
+  for (let i = 0; i < n; i++) px32[i] = cellColor(i);
+  bctx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(buf, 0, 0, cols * CELL, rows * CELL);
+
+  drawAICursor();
+
+  if (sensorOn) {
+    const cx = Math.floor(mouseX / CELL), cy = Math.floor(mouseY / CELL);
+    if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+      const t = temp[idx(cx, cy)];
+      const lb = Math.round(t) + '\u00b0C';
+      ctx.font = 'bold 14px Arial';
+      const w = ctx.measureText(lb).width;
+      const bx = mouseX + 14, by = mouseY - 28;
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillRect(bx, by, w + 12, 22);
+      ctx.strokeStyle = tempColor(t);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, w + 12, 22);
+      ctx.fillStyle = tempColor(t);
+      ctx.fillText(lb, bx + 6, by + 16);
+    }
+  }
+}
+
+// ===== ГЛАВНЫЙ ЦИКЛ =====
+function tick() {
+  // Пока кнопка зажата, материал продолжает сыпаться даже если мышь не двигается
+  if (isDrawing) paintAt(mouseX, mouseY);
+  applyWindSources();
+  step();
+  step();
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] === SPAWNER) updateSpawner(i % cols, (i / cols) | 0, i);
+  }
+  updateTemperatures();
+  updateAICursor();
+  if (explosionQueue.length > 0) {
+    const q = explosionQueue;
+    explosionQueue = [];
+    for (const ex of q) explode(ex.x, ex.y, ex.r);
+  }
+  simTick++;
+  if (simTick % 6 === 0) updateMissionProgress();
+}
+
+let lastTime = 0, acc = 0;
+function loop(now) {
+  const dt = lastTime ? now - lastTime : TICK_MS;
+  lastTime = now;
+  if (!paused && grid) {
+    // Фиксированный шаг: скорость игры не зависит от частоты монитора (раньше на 144 Гц всё шло в 2,4 раза быстрее)
+    acc = Math.min(acc + dt, TICK_MS * 4);
+    while (acc >= TICK_MS) { tick(); acc -= TICK_MS; }
+  } else {
+    acc = 0;
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ===== ЗАПУСК =====
+buildToolbar();
+resize();
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(stage);
+window.addEventListener('resize', resize);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

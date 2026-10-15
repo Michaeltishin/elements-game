@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Elements</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: Arial, sans-serif; }
+    #canvas { display: block; image-rendering: pixelated; }
+
+    .topbar {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 10; pointer-events: auto; user-select: none;
+      display: flex; gap: 8px;
+    }
+    .topbar button {
+      padding: 6px 14px; cursor: pointer;
+      background: #2a2a2a; border: 2px solid #444; color: #aaa;
+      font-size: 13px; border-radius: 6px;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .topbar button:hover { background: #383838; border-color: #666; color: #fff; }
+    .topbar button.active { background: #444; border-color: #888; color: #fff; }
+
+    .title {
+      position: absolute; top: 10px; left: 14px; z-index: 10;
+      font-size: 22px; font-weight: bold; user-select: none;
+      background: linear-gradient(90deg, #ff3366, #ffaa00, #33ff66, #3399ff, #cc33ff);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; letter-spacing: 2px;
+    }
+
+    .toolbar {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      z-index: 10; pointer-events: auto; user-select: none;
+      display: flex; align-items: flex-end; justify-content: center;
+      gap: 6px; padding: 8px 12px 10px;
+      background: linear-gradient(180deg, transparent, rgba(0,0,0,0.6));
+      flex-wrap: wrap;
+    }
+
+    .el-btn {
+      width: 58px; height: 64px; border-radius: 8px;
+      cursor: pointer; border: 2px solid #333;
+      background: #1e1e1e; overflow: hidden;
+      display: flex; flex-direction: column;
+      transition: border-color 0.15s, transform 0.1s, opacity 0.15s;
+      position: relative;
+    }
+    .el-btn:hover { border-color: #666; transform: translateY(-2px); }
+    .el-btn.active { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.3); }
+    .el-btn.inactive { opacity: 0.4; }
+
+    .el-preview { width: 100%; height: 38px; display: flex; align-items: center; justify-content: center; }
+    .el-preview canvas { display: block; }
+    .el-label { font-size: 10px; color: #ccc; text-align: center; padding: 2px 0 4px; background: rgba(0,0,0,0.4); }
+
+    .brush-row {
+      display: flex; align-items: center; gap: 8px;
+      color: #aaa; font-size: 13px; margin-left: 12px; padding-bottom: 6px;
+    }
+    input[type=range] { cursor: pointer; accent-color: #66aaff; }
+  </style>
+</head>
+<body>
+  <div class="title">Elements</div>
+
+  <div class="topbar">
+    <button id="btn-sensor" onclick="toggleSensor()">Датчик: ВЫКЛ</button>
+    <button id="btn-pause" onclick="togglePause()">Пауза: ВЫКЛ</button>
+    <button id="btn-ai" onclick="toggleAI()">ИИ-курсор: ВЫКЛ</button>
+  </div>
+
+  <div class="toolbar" id="toolbar"></div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const CELL = 6;
+    let cols, rows, grid, next, life, temp;
+
+    const EMPTY = 0, SAND = 1, WATER = 2, PLANT = 3, FIRE = 4, STONE = 5, ICE = 6, LAVA = 7;
+
+    const ELEMENTS = [
+      { id: 'sand',  name: 'Песок',    cell: SAND  },
+      { id: 'water', name: 'Вода',     cell: WATER },
+      { id: 'plant', name: 'Растение', cell: PLANT },
+      { id: 'stone', name: 'Камень',   cell: STONE },
+      { id: 'ice',   name: 'Лёд',      cell: ICE   },
+      { id: 'fire',  name: 'Огонь',    cell: FIRE  },
+      { id: 'lava',  name: 'Лава',     cell: LAVA  },
+      { id: 'erase', name: 'Ластик',   cell: EMPTY },
+    ];
+
+    function initGrid() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      cols = Math.floor(canvas.width / CELL);
+      rows = Math.floor(canvas.height / CELL);
+      grid = new Uint8Array(cols * rows);
+      next = new Uint8Array(cols * rows);
+      life = new Int16Array(cols * rows);
+      temp = new Float32Array(cols * rows);
+      temp.fill(20);
+    }
+    initGrid();
+    window.addEventListener('resize', initGrid);
+
+    let tool = 'sand';
+    let brushSize = 2;
+    let mouseX = -100, mouseY = -100;
+    let sensorOn = false;
+    let paused = false;
+
+    // === Превью текстур ===
+    function drawPreview(cell) {
+      const pc = document.createElement('canvas');
+      pc.width = 54; pc.height = 38;
+      const pctx = pc.getContext('2d');
+      pctx.fillStyle = '#1e1e1e';
+      pctx.fillRect(0, 0, 54, 38);
+      if (cell === EMPTY) {
+        pctx.strokeStyle = '#ff4444'; pctx.lineWidth = 3;
+        pctx.beginPath();
+        pctx.moveTo(14, 10); pctx.lineTo(40, 28);
+        pctx.moveTo(40, 10); pctx.lineTo(14, 28);
+        pctx.stroke();
+        return pc;
+      }
+      const ps = 5;
+      for (let py = 0; py < 38; py += ps) {
+        for (let px = 0; px < 54; px += ps) {
+          let r = Math.random();
+          if (cell === FIRE)       pctx.fillStyle = r < 0.3 ? '#ff3300' : r < 0.6 ? '#ff9900' : '#ffcc00';
+          else if (cell === LAVA)  pctx.fillStyle = r < 0.3 ? '#ffee44' : r < 0.6 ? '#ff7700' : '#cc3300';
+          else if (cell === STONE) pctx.fillStyle = r < 0.2 ? '#777' : r < 0.5 ? '#888' : '#999';
+          else if (cell === SAND)  pctx.fillStyle = r < 0.2 ? '#d8b43c' : r < 0.6 ? '#e8c44c' : '#f0d45c';
+          else if (cell === WATER) pctx.fillStyle = r < 0.2 ? '#2770c4' : r < 0.6 ? '#2f7fd4' : '#378fe0';
+          else if (cell === ICE)   pctx.fillStyle = r < 0.2 ? '#98d0e8' : r < 0.6 ? '#a8e0f0' : '#b8eaf8';
+          else if (cell === PLANT) pctx.fillStyle = r < 0.2 ? '#2aa53a' : r < 0.6 ? '#3ab54a' : '#4ac55a';
+          pctx.fillRect(px, py, ps, ps);
+        }
+      }
+      return pc;
+    }
+
+    function buildToolbar() {
+      const tb = document.getElementById('toolbar');
+      tb.innerHTML = '';
+      for (const el of ELEMENTS) {
+        const btn = document.createElement('div');
+        btn.className = 'el-btn' + (el.id === tool ? ' active' : '');
+        btn.id = 'btn-' + el.id;
+        btn.onclick = () => setTool(el.id);
+        const prev = document.createElement('div');
+        prev.className = 'el-preview';
+        prev.appendChild(drawPreview(el.cell));
+        const label = document.createElement('div');
+        label.className = 'el-label';
+        label.textContent = el.name;
+        btn.appendChild(prev);
+        btn.appendChild(label);
+        tb.appendChild(btn);
+      }
+      const brushDiv = document.createElement('div');
+      brushDiv.className = 'brush-row';
+      brushDiv.innerHTML = 'Размер: <input type="range" id="brushSize" min="1" max="12" value="2"> <span id="brushVal">2</span>';
+      tb.appendChild(brushDiv);
+      document.getElementById('brushSize').addEventListener('input', e => {
+        brushSize = parseInt(e.target.value);
+        document.getElementById('brushVal').textContent = brushSize;
+      });
+    }
+    buildToolbar();
+
+    function setTool(t) {
+      // Повторный клик по активному элементу — выключает его
+      if (tool === t) {
+        tool = null;
+      } else {
+        tool = t;
+      }
+      document.querySelectorAll('.el-btn').forEach(b => {
+        b.classList.remove('active');
+        b.classList.add('inactive');
+      });
+      if (tool) {
+        const btn = document.getElementById('btn-' + tool);
+        if (btn) { btn.classList.add('active'); btn.classList.remove('inactive'); }
+      } else {
+        // Если ничего не выбрано — все кнопки обычные
+        document.querySelectorAll('.el-btn').forEach(b => b.classList.remove('inactive'));
+      }
+    }
+
+    function toggleSensor() {
+      sensorOn = !sensorOn;
+      const btn = document.getElementById('btn-sensor');
+      btn.textContent = 'Датчик: ' + (sensorOn ? 'ВКЛ' : 'ВЫКЛ');
+      btn.classList.toggle('active', sensorOn);
+    }
+
+    function togglePause() {
+      paused = !paused;
+      const btn = document.getElementById('btn-pause');
+      btn.textContent = 'Пауза: ' + (paused ? 'ВКЛ' : 'ВЫКЛ');
+      btn.classList.toggle('active', paused);
+    }
+
+    // === ИИ-курсор ===
+    let aiCursor = null; // {x, y, vx, vy, timer}
+
+    function toggleAI() {
+      if (aiCursor) {
+        aiCursor = null;
+      } else {
+        aiCursor = {
+          x: canvas.width / 2 + (Math.random() - 0.5) * 200,
+          y: canvas.height / 3 + (Math.random() - 0.5) * 100,
+          vx: (Math.random() - 0.5) * 4,
+          vy: (Math.random() - 0.5) * 4,
+          timer: 0,
+        };
+      }
+      const btn = document.getElementById('btn-ai');
+      btn.textContent = 'ИИ-курсор: ' + (aiCursor ? 'ВКЛ' : 'ВЫКЛ');
+      btn.classList.toggle('active', !!aiCursor);
+    }
+
+    function updateAICursor() {
+      if (!aiCursor) return;
+
+      // Случайные изменения направления
+      aiCursor.vx += (Math.random() - 0.5) * 0.8;
+      aiCursor.vy += (Math.random() - 0.5) * 0.8;
+      // Ограничение скорости
+      const maxSpeed = 5;
+      aiCursor.vx = Math.max(-maxSpeed, Math.min(maxSpeed, aiCursor.vx));
+      aiCursor.vy = Math.max(-maxSpeed, Math.min(maxSpeed, aiCursor.vy));
+
+      aiCursor.x += aiCursor.vx;
+      aiCursor.y += aiCursor.vy;
+
+      // Отскок от границ
+      const margin = 40;
+      if (aiCursor.x < margin) { aiCursor.x = margin; aiCursor.vx = Math.abs(aiCursor.vx); }
+      if (aiCursor.x > canvas.width - margin) { aiCursor.x = canvas.width - margin; aiCursor.vx = -Math.abs(aiCursor.vx); }
+      if (aiCursor.y < margin + 50) { aiCursor.y = margin + 50; aiCursor.vy = Math.abs(aiCursor.vy); }
+      if (aiCursor.y > canvas.height - 100) { aiCursor.y = canvas.height - 100; aiCursor.vy = -Math.abs(aiCursor.vy); }
+
+      // Спавн случайного элемента
+      aiCursor.timer++;
+      if (aiCursor.timer >= 8) {
+        aiCursor.timer = 0;
+        const choices = ['sand', 'water', 'plant', 'stone', 'ice', 'fire', 'lava'];
+        const pick = choices[Math.floor(Math.random() * choices.length)];
+        const cx = Math.floor(aiCursor.x / CELL);
+        const cy = Math.floor(aiCursor.y / CELL);
+        const r = 1 + Math.floor(Math.random() * 2);
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (dx*dx + dy*dy > r*r + 1) continue;
+            const nx = cx + dx, ny = cy + dy;
+            if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+            const i = idx(nx, ny);
+            if (pick === 'sand' && grid[i] === EMPTY) { grid[i] = SAND; temp[i] = 20; }
+            else if (pick === 'water' && grid[i] === EMPTY) { grid[i] = WATER; temp[i] = 20; }
+            else if (pick === 'plant' && grid[i] === EMPTY) { grid[i] = PLANT; temp[i] = 20; }
+            else if (pick === 'stone' && grid[i] === EMPTY) { grid[i] = STONE; temp[i] = 20; }
+            else if (pick === 'ice' && grid[i] === EMPTY) { grid[i] = ICE; temp[i] = -50; }
+            else if (pick === 'fire' && (grid[i] === EMPTY || grid[i] === PLANT)) { grid[i] = FIRE; life[i] = 15 + Math.floor(Math.random()*10); temp[i] = 800; }
+            else if (pick === 'lava' && grid[i] === EMPTY) { grid[i] = LAVA; temp[i] = 5000; }
+          }
+        }
+      }
+    }
+
+    function drawAICursor() {
+      if (!aiCursor) return;
+      // Рисуем курсор в виде стрелочки
+      const x = aiCursor.x, y = aiCursor.y;
+      ctx.save();
+      ctx.strokeStyle = '#ffffff';
+      ctx.fillStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#3399ff';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + 14, y + 5);
+      ctx.lineTo(x + 6, y + 8);
+      ctx.lineTo(x + 10, y + 16);
+      ctx.lineTo(x + 7, y + 17);
+      ctx.lineTo(x + 3, y + 10);
+      ctx.lineTo(x, y + 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function idx(x, y) { return y * cols + x; }
+
+    // Рисование мышью
+    let isDrawing = false;
+    let lastPaintX = -1, lastPaintY = -1;
+
+    function paintAt(px, py) {
+      if (!tool) return;
+      const cx = Math.floor(px / CELL);
+      const cy = Math.floor(py / CELL);
+      if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) return;
+
+      // Проверка — не стёрли ли ИИ-курсор
+      if (tool === 'erase' && aiCursor) {
+        const dx = px - aiCursor.x, dy = py - aiCursor.y;
+        if (dx*dx + dy*dy < (brushSize * CELL + 10) ** 2) {
+          aiCursor = null;
+          const btn = document.getElementById('btn-ai');
+          btn.textContent = 'ИИ-курсор: ВЫКЛ';
+          btn.classList.remove('active');
+        }
+      }
+
+      const r = brushSize;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r * r + 1) continue;
+          const x = cx + dx, y = cy + dy;
+          if (x < 0 || x >= cols || y < 0 || y >= rows) continue;
+          const i = idx(x, y);
+
+          if (tool === 'erase') { grid[i] = EMPTY; life[i] = 0; temp[i] = 20; }
+          else if (tool === 'plant' && grid[i] === EMPTY) { grid[i] = PLANT; temp[i] = 20; }
+          else if (tool === 'stone' && grid[i] === EMPTY) { grid[i] = STONE; temp[i] = 20; }
+          else if (tool === 'ice' && grid[i] === EMPTY) { grid[i] = ICE; temp[i] = -50; }
+          else if (tool === 'sand' && grid[i] === EMPTY) { grid[i] = SAND; temp[i] = 20; }
+          else if (tool === 'water' && grid[i] === EMPTY) { grid[i] = WATER; temp[i] = 20; }
+          else if (tool === 'fire') {
+            if (grid[i] === EMPTY || grid[i] === PLANT) { grid[i] = FIRE; life[i] = 15 + Math.floor(Math.random()*10); temp[i] = 800; }
+            else if (grid[i] === ICE) { grid[i] = WATER; temp[i] = 20; }
+          }
+          else if (tool === 'lava' && grid[i] === EMPTY) { grid[i] = LAVA; temp[i] = 5000; }
+        }
+      }
+    }
+
+    function paintLine(x1, y1, x2, y2) {
+      const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+      const steps = Math.max(dx, dy);
+      if (steps === 0) { paintAt(x1, y1); return; }
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        paintAt(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+      }
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      isDrawing = true;
+      lastPaintX = e.clientX; lastPaintY = e.clientY;
+      paintAt(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => { isDrawing = false; lastPaintX = lastPaintY = -1; });
+    canvas.addEventListener('mousemove', e => {
+      mouseX = e.clientX; mouseY = e.clientY;
+      if (!isDrawing) return;
+      const dist = Math.sqrt((e.clientX - lastPaintX) ** 2 + (e.clientY - lastPaintY) ** 2);
+      if (dist < CELL) return;
+      paintLine(lastPaintX, lastPaintY, e.clientX, e.clientY);
+      lastPaintX = e.clientX; lastPaintY = e.clientY;
+    });
+
+    // Цвета
+    function fireColor(l) {
+      if (l > 18) return '#ff3300';
+      if (l > 12) return '#ff6600';
+      if (l > 7)  return '#ff9900';
+      if (l > 3)  return '#ffcc00';
+      return '#ffff00';
+    }
+    function stoneColor(t) {
+      if (t > 800) return '#ff5533';
+      if (t > 500) return '#aa6644';
+      if (t > 200) return '#997755';
+      return '#888888';
+    }
+    function iceColor(t) { return t > -10 ? '#c8eef8' : '#a8e0f0'; }
+    function lavaColor(t) {
+      if (t > 4000) return '#ffee44';
+      if (t > 3000) return '#ffaa00';
+      if (t > 2000) return '#ff7700';
+      if (t > 1000) return '#ff4400';
+      return '#cc3300';
+    }
+    function tempColor(t) {
+      if (t < -100) return '#3399ff';
+      if (t < 0)    return '#66ccff';
+      if (t < 100)  return '#ffffff';
+      if (t < 500)  return '#ffff66';
+      if (t < 1000) return '#ff9933';
+      if (t < 3000) return '#ff6600';
+      return '#ff3300';
+    }
+
+    // Физика
+    let frameCount = 0;
+
+    function step() {
+      next.set(grid);
+      for (let y = rows - 1; y >= 0; y--) {
+        const leftToRight = (frameCount % 2 === 0);
+        if (leftToRight) { for (let x = 0; x < cols; x++) updateCell(x, y); }
+        else { for (let x = cols - 1; x >= 0; x--) updateCell(x, y); }
+      }
+      grid.set(next);
+    }
+
+    function updateCell(x, y) {
+      const i = idx(x, y);
+      const cell = grid[i];
+      if (cell === EMPTY || cell === PLANT || cell === STONE || cell === ICE) return;
+      if (cell === SAND)      updateSand(x, y, i);
+      else if (cell === WATER) updateWater(x, y, i);
+      else if (cell === FIRE)  updateFire(x, y, i);
+      else if (cell === LAVA)  updateLava(x, y, i);
+    }
+
+    function updateSand(x, y, i) {
+      if (y + 1 >= rows) return;
+      const below = idx(x, y + 1);
+      if (grid[below] === EMPTY) { next[i] = EMPTY; next[below] = SAND; return; }
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols) continue;
+        const diag = idx(nx, y + 1);
+        if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) { next[i] = EMPTY; next[diag] = SAND; return; }
+      }
+    }
+
+    function updateWater(x, y, i) {
+      if (y + 1 >= rows) return;
+      const below = idx(x, y + 1);
+      if (grid[below] === EMPTY) { next[i] = EMPTY; next[below] = WATER; return; }
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx < 0 || nx >= cols) continue;
+        const diag = idx(nx, y + 1);
+        if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) { next[i] = EMPTY; next[diag] = WATER; return; }
+      }
+      if (Math.random() < 0.4) {
+        for (const d of [dir, -dir]) {
+          const nx = x + d;
+          if (nx < 0 || nx >= cols) continue;
+          const side = idx(nx, y);
+          if (grid[side] === EMPTY && next[side] === EMPTY) { next[i] = EMPTY; next[side] = WATER; return; }
+        }
+      }
+    }
+
+    function updateFire(x, y, i) {
+      life[i]--;
+      if (life[i] <= 0) { next[i] = EMPTY; life[i] = 0; temp[i] = 20; return; }
+      const neighbors = [[x,y-1],[x,y+1],[x-1,y],[x+1,y],[x-1,y-1],[x+1,y-1],[x-1,y+1],[x+1,y+1]];
+      for (const [nx, ny] of neighbors) {
+        if (nx<0||nx>=cols||ny<0||ny>=rows) continue;
+        const ni = idx(nx, ny);
+        if (grid[ni] === PLANT && next[ni] === PLANT) {
+          if (Math.random() < 0.35) { next[ni] = FIRE; life[ni] = 15 + Math.floor(Math.random()*10); temp[ni] = 800; }
+        }
+        if (grid[ni] === ICE) { if (Math.random() < 0.25) { next[ni] = WATER; temp[ni] = 20; } }
+        if (grid[ni] === WATER) { life[i] -= 3; if (Math.random() < 0.3) { next[ni] = EMPTY; temp[ni] = 20; } }
+      }
+      if (y - 1 >= 0) {
+        const above = idx(x, y - 1);
+        if (grid[above] === EMPTY && next[above] === EMPTY) { next[above] = FIRE; life[above] = life[i]; temp[above] = 800; next[i] = EMPTY; life[i] = 0; temp[i] = 20; return; }
+      }
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx<0||nx>=cols||y-1<0) continue;
+        const diag = idx(nx, y - 1);
+        if (grid[diag] === EMPTY && next[diag] === EMPTY) { next[diag] = FIRE; life[diag] = life[i]; temp[diag] = 800; next[i] = EMPTY; life[i] = 0; temp[i] = 20; return; }
+      }
+    }
+
+    function updateLava(x, y, i) {
+      if (Math.random() > 0.7) return;
+      if (y + 1 >= rows) return;
+      const below = idx(x, y + 1);
+      if (grid[below] === EMPTY) { next[i] = EMPTY; next[below] = LAVA; temp[below] = temp[i]; temp[i] = 20; return; }
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      for (const d of [dir, -dir]) {
+        const nx = x + d;
+        if (nx<0||nx>=cols) continue;
+        const diag = idx(nx, y + 1);
+        if (grid[diag] === EMPTY && grid[idx(nx, y)] === EMPTY) { next[i] = EMPTY; next[diag] = LAVA; temp[diag] = temp[i]; temp[i] = 20; return; }
+      }
+      if (Math.random() < 0.2) {
+        for (const d of [dir, -dir]) {
+          const nx = x + d;
+          if (nx<0||nx>=cols) continue;
+          const side = idx(nx, y);
+          if (grid[side] === EMPTY && next[side] === EMPTY) { next[i] = EMPTY; next[side] = LAVA; temp[side] = temp[i]; temp[i] = 20; return; }
+        }
+      }
+    }
+
+    function updateTemperatures() {
+      const phaseChanges = [];
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const i = idx(x, y);
+          const cell = grid[i];
+
+          if (cell === FIRE) {
+            const dirs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];
+            for (const [dx, dy] of dirs) {
+              const nx = x+dx, ny = y+dy;
+              if (nx<0||nx>=cols||ny<0||ny>=rows) continue;
+              const ni = idx(nx, ny);
+              if (grid[ni] === STONE) {
+                temp[ni] += 0.42;
+                if (temp[ni] >= 1000) phaseChanges.push({i: ni, c: LAVA, t: temp[ni]});
+              }
+            }
+          }
+
+          if (cell === LAVA) {
+            const r = 3;
+            let touchedWater = false;
+            for (let dy = -r; dy <= r; dy++) {
+              for (let dx = -r; dx <= r; dx++) {
+                if (dx===0&&dy===0) continue;
+                if (dx*dx+dy*dy > r*r+1) continue;
+                const nx = x+dx, ny = y+dy;
+                if (nx<0||nx>=cols||ny<0||ny>=rows) continue;
+                const ni = idx(nx, ny);
+                const nc = grid[ni];
+                if (nc === STONE) { temp[ni] += 100; if (temp[ni] >= 1000) phaseChanges.push({i: ni, c: LAVA, t: temp[ni]}); }
+                else if (nc === ICE) phaseChanges.push({i: ni, c: WATER, t: 20});
+                else if (nc === PLANT) { phaseChanges.push({i: ni, c: FIRE, t: 800}); life[ni] = 15 + Math.floor(Math.random()*10); }
+                else if (nc === WATER) {
+                  touchedWater = true;
+                  phaseChanges.push({i: ni, c: EMPTY, t: 20});
+                  temp[i] -= 200;
+                }
+              }
+            }
+            // Вода + лава = каменная корочка на лаве
+            if (touchedWater && Math.random() < 0.5) {
+              phaseChanges.push({i: i, c: STONE, t: 600});
+            }
+            temp[i] -= 10;
+            if (temp[i] < 900 && !touchedWater) phaseChanges.push({i: i, c: STONE, t: temp[i]});
+          }
+
+          if (cell === STONE && temp[i] > 20) { temp[i] -= 2; if (temp[i] < 20) temp[i] = 20; }
+          if (cell === ICE && temp[i] > 0) phaseChanges.push({i: i, c: WATER, t: 20});
+        }
+      }
+      for (const ch of phaseChanges) { grid[ch.i] = ch.c; temp[ch.i] = ch.t; }
+    }
+
+    // Отрисовка
+    function draw() {
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const i = idx(x, y);
+          const cell = grid[i];
+          if (cell === EMPTY) continue;
+          if (cell === FIRE)       ctx.fillStyle = fireColor(life[i]);
+          else if (cell === SAND)  ctx.fillStyle = '#e8c44c';
+          else if (cell === WATER) ctx.fillStyle = '#2f7fd4';
+          else if (cell === PLANT) ctx.fillStyle = '#3ab54a';
+          else if (cell === STONE) ctx.fillStyle = stoneColor(temp[i]);
+          else if (cell === ICE)   ctx.fillStyle = iceColor(temp[i]);
+          else if (cell === LAVA)  ctx.fillStyle = lavaColor(temp[i]);
+          ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+      }
+
+      // ИИ-курсор
+      drawAICursor();
+
+      // Температурный датчик
+      if (sensorOn) {
+        const cx = Math.floor(mouseX / CELL);
+        const cy = Math.floor(mouseY / CELL);
+        if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+          const t = temp[idx(cx, cy)];
+          const tRound = Math.round(t);
+          const label = tRound + '°C';
+          ctx.font = 'bold 14px Arial';
+          const w = ctx.measureText(label).width;
+          const bx = mouseX + 14, by = mouseY - 28;
+          ctx.fillStyle = 'rgba(0,0,0,0.85)';
+          ctx.fillRect(bx, by, w + 12, 22);
+          ctx.strokeStyle = tempColor(t);
+          ctx.lineWidth = 1;
+          ctx.strokeRect(bx, by, w + 12, 22);
+          ctx.fillStyle = tempColor(t);
+          ctx.fillText(label, bx + 6, by + 16);
+        }
+      }
+    }
+
+    function loop() {
+      if (!paused) {
+        step(); step();
+        updateTemperatures();
+        updateAICursor();
+      }
+      draw();
+      frameCount++;
+      requestAnimationFrame(loop);
+    }
+    loop();
+  </script>
+</body>
+</html>

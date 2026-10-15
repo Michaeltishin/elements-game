@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Elements</title>
-<script src="peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -939,7 +939,7 @@ function resize() {
       try { MP.conn.send({ k: 'needSnap' }); } catch (e) {}
     }
   }
-}
+  
   buf = document.createElement('canvas');
   buf.width = cols; buf.height = rows;
   bctx = buf.getContext('2d');
@@ -7432,14 +7432,6 @@ function returnToMenu() {
   } catch (e) {}
   location.reload();
 }
-document.querySelectorAll('.mode-preview').forEach(drawModePreview);
-document.querySelectorAll('.mode-card').forEach(card => {
-  card.addEventListener('click', () => {
-    try { sfxInit(); sfxClick(); } catch (e) {}
-    if (card.dataset.mode === 'multi') { mpOpenDialog(); return; }
-    startGame(card.dataset.mode);
-  });
-});
 
 /* ===== PULSAR ===== */
 function sfxPulsarBoom() {
@@ -7953,7 +7945,6 @@ function mpFail(msg) {
   try { if (MP.peer) MP.peer.destroy(); } catch (e) {}
   MP.peer = null;
 }
-
 function mpJoinClient(hostId) {
   mpStatus('Вход в комнату…');
   const peer = new Peer(undefined, {

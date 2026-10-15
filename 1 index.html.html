@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Песочница: песок, вода, растение</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #222; }
+    #canvas { display: block; }
+    .ui { position: absolute; top: 10px; left: 10px; color: #fff; font-family: sans-serif; pointer-events: none; }
+    button { padding: 8px 16px; cursor: pointer; margin-right: 8px; background: #444; color: white; border: 1px solid #666; }
+    button:hover { background: #555; }
+  </style>
+</head>
+<body>
+  <div class="ui">
+    <button onclick="setTool('sand')">Песок</button>
+    <button onclick="setTool('water')">Вода</button>
+    <button onclick="setTool('plant')">Растение</button>
+    <span id="tool" style="margin-left:10px;">Песок</span>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const particles = [];
+    let tool = 'sand';
+
+    function setTool(t) {
+      tool = t;
+      const span = document.getElementById('tool');
+      span.textContent = t === 'sand' ? 'Песок' : t === 'water' ? 'Вода' : 'Растение';
+    }
+
+    class Particle {
+      constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        // Небольшая случайность при создании
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = 0;
+        this.type = type;
+        this.size = 4;
+        this.active = true;
+      }
+
+      update() {
+        if (!this.active) return;
+
+        const floor = canvas.height - 10;
+
+        // Гравитация только для песка и воды
+        if (this.type === 'sand' || this.type === 'water') {
+          this.vy += 0.8;
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Пол
+        if (this.y >= floor) {
+          this.y = floor;
+
+          if (this.type === 'sand') {
+            // Песок: небольшой отскок + трение
+            this.vy *= -0.3;
+            this.vx *= 0.95;
+            if (Math.abs(this.vy) < 0.2 && Math.abs(this.vx) < 0.2) {
+              this.vy = 0;
+              this.vx = 0;
+            }
+          } else if (this.type === 'water') {
+            // Вода: почти не отскакивает, быстро гасит скорость (растекается)
+            this.vy *= -0.1;
+            this.vx *= 0.98;
+            if (Math.abs(this.vy) < 0.1 && Math.abs(this.vx) < 0.1) {
+              this.vy = 0;
+              this.vx = 0;
+            }
+          }
+        }
+      }
+
+      draw() {
+        ctx.fillStyle = this.type === 'sand' ? '#f4d03f' :
+                        this.type === 'water' ? '#3498db' :
+                        '#2ecc71';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Растение: ставим сразу на пол, не даём падать
+    function createPlant(x) {
+      const h = 60;
+      // Делаем «стебель» из частиц
+      for (let i = 0; i < 5; i++) {
+        particles.push(new Particle(x, canvas.height - 10 - i * 12, 'plant'));
+      }
+      // Добавляем «листики»
+      particles.push(new Particle(x - 15, canvas.height - 70, 'plant'));
+      particles.push(new Particle(x + 15, canvas.height - 70, 'plant'));
+    }
+
+    let isDrawing = false;
+    window.addEventListener('mousedown', () => isDrawing = true);
+    window.addEventListener('mouseup', () => isDrawing = false);
+
+    window.addEventListener('mousemove', e => {
+      if (!isDrawing) return;
+      for (let i = 0; i < 3; i++) {
+        const dx = (Math.random() - 0.5) * 40;
+        const dy = (Math.random() - 0.5) * 40;
+        if (tool === 'plant') {
+          createPlant(e.clientX + dx);
+        } else {
+          particles.push(new Particle(e.clientX + dx, e.clientY + dy, tool));
+        }
+      }
+    });
+
+    function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach(p => p.update());
+      particles.forEach(p => p.draw());
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+  </script>
+</body>
+</html>
